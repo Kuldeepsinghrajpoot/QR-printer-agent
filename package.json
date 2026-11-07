@@ -43,7 +43,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "Kuldeepsinghrajpoot",
+        "owner": "Lexical Software",
         "repo": "QR-printer-agent",
         "releaseType": "release"
       }
