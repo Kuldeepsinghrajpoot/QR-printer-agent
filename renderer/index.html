@@ -13,16 +13,13 @@
       <h1>Printer Monitor <span class="plus">+ Print Agent</span></h1>
       <p class="sub" id="lastScan">Not scanned yet</p>
     </div>
-    <div class="topbar-right">
-      <!-- Hidden unless a newer version is on GitHub (see update.js) -->
-      <button id="updateBtn" class="update-btn hidden" type="button"></button>
-      <div class="actions monitor-only">
-        <label class="toggle">
-          <input type="checkbox" id="autoRefresh" />
-          <span>Auto-refresh (30s)</span>
-        </label>
-        <button id="refreshBtn" class="primary">Scan printers</button>
-      </div>
+    <div class="actions monitor-only">
+      <button id="updateBtn" class="small hidden" type="button"></button>
+      <label class="toggle">
+        <input type="checkbox" id="autoRefresh" />
+        <span>Auto-refresh (30s)</span>
+      </label>
+      <button id="refreshBtn" class="primary">Scan printers</button>
     </div>
   </header>
 
@@ -78,14 +75,21 @@
     <div class="agent-grid">
       <section class="panel">
         <h3>Server connection</h3>
-        <label class="f" for="serverUrl">Dashboard server URL</label>
-        <input id="serverUrl" type="text" placeholder="https://your-shop.vercel.app" />
-        <label class="f" for="agentApiKey">Agent API key</label>
-        <div class="keywrap">
-          <input id="agentApiKey" type="password" placeholder="Paste AGENT_API_KEY from the server settings" />
-          <button type="button" class="small" id="toggleKey">Show</button>
+        <label class="f">Agent API key</label>
+        <!-- Key already added: only a status line is shown, never the key itself -->
+        <div id="keySubmitted" class="key-submitted hidden">
+          <span class="pill good">&#10003; Key submitted</span>
+          <button type="button" class="small" id="replaceKey">Replace key</button>
         </div>
-        <p class="hint">Must exactly match <b>AGENT_API_KEY</b> on the server (Vercel &rarr; Environment Variables).</p>
+        <!-- No key yet (or replacing it) -->
+        <div id="keyEntry" class="hidden">
+          <div class="keywrap">
+            <input id="agentApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the agent key" />
+            <button type="button" class="primary" id="addKey">Add key</button>
+            <button type="button" class="small hidden" id="cancelKey">Cancel</button>
+          </div>
+          <p class="hint">After you add it, the key is hidden and is never shown again. To change it later, use <b>Replace key</b>.</p>
+        </div>
 
         <h3>Timing</h3>
         <div class="grid2">

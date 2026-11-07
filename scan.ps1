@@ -15,7 +15,12 @@ $gpErrMap = @{
 function Test-Tcp([string]$hostName, [int]$port) {
     $c = New-Object System.Net.Sockets.TcpClient
     try {
-        $iar = $c.BeginConnect($hostName, $port, $null, $null)
+        $address = $null
+        if ([System.Net.IPAddress]::TryParse($hostName, [ref]$address)) {
+            $iar = $c.BeginConnect($address, $port, $null, $null)
+        } else {
+            $iar = $c.BeginConnect($hostName, $port, $null, $null)
+        }
         if ($iar.AsyncWaitHandle.WaitOne(1500, $false) -and $c.Connected) {
             $c.EndConnect($iar)
             return $true
@@ -134,7 +139,7 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         }
         if ($wsdIp) {
             $ip = $wsdIp
-            $alive = (Test-Tcp $wsdIp 9100) -or (Test-Tcp $wsdIp 80) -or (Test-Tcp $wsdIp 443) -or (Test-Tcp $wsdIp 631) -or (Test-Connection -ComputerName $wsdIp -Count 1 -Quiet)
+            $alive = (Test-Tcp $wsdIp 5357) -or (Test-Tcp $wsdIp 5358) -or (Test-Tcp $wsdIp 9100) -or (Test-Tcp $wsdIp 80) -or (Test-Tcp $wsdIp 443) -or (Test-Tcp $wsdIp 631) -or (Test-Connection -ComputerName $wsdIp -Count 1 -Quiet)
             if ($alive) { $detail = "Reachable at $wsdIp" }
             else { $connection = 'disconnected'; $detail = "No response from $wsdIp" }
         }

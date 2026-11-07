@@ -105,26 +105,12 @@ function refreshTray() {
       { label: agentStatusLabel(status), enabled: false },
       { label: 'Queued retries: ' + status.queueLength, enabled: false },
       { type: 'separator' },
-      ...(updater.getState().state === 'available'
-        ? [{ label: 'Update available (v' + updater.getState().version + ') - install now', click: () => void updater.install() }]
-        : []),
       { label: 'Open', click: showWindow },
       { label: 'Sync now', click: () => { void worker.pollOnce(); void worker.heartbeatOnce(); } },
-      { label: 'Check for updates', click: () => void updater.check() },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
-}
-
-function pushUpdateState(st) {
-  refreshTray(); // adds / removes the "Update available" tray item
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:state', st);
-}
-
-function registerUpdateIpc() {
-  ipcMain.handle('update:get-state', () => updater.getState());
-  ipcMain.handle('update:install', () => updater.install()); // the "Update" button
 }
 
 function pushAgentStatus(status) {
@@ -143,8 +129,7 @@ const num = (v, min, fallback) => Math.max(min, Number(v) || fallback);
 function cleanAgentConfig(input) {
   const c = input || {};
   const out = {};
-  if ('serverUrl' in c) out.serverUrl = String(c.serverUrl || '').trim();
-  if ('agentApiKey' in c) out.agentApiKey = String(c.agentApiKey || '').trim();
+  // serverUrl is fixed in config.js, and the agent key is only changed through 'agent:set-key' - never through here.
   if ('pollIntervalSeconds' in c) out.pollIntervalSeconds = num(c.pollIntervalSeconds, 3, 5);
   if ('heartbeatIntervalSeconds' in c) out.heartbeatIntervalSeconds = num(c.heartbeatIntervalSeconds, 10, 30);
   if ('defaultSystemPrinterName' in c) out.defaultSystemPrinterName = String(c.defaultSystemPrinterName || '');
@@ -162,7 +147,19 @@ function cleanAgentConfig(input) {
 }
 
 function registerAgentIpc() {
-  ipcMain.handle('agent:get-config', () => agentConfig.getAll());
+  // The window never receives the agent key (or the fixed server URL) - only whether a key has been added.
+  ipcMain.handle('agent:get-config', () => {
+    const { agentApiKey, serverUrl, ...safe } = agentConfig.getAll();
+    return { ...safe, hasAgentKey: !!agentApiKey };
+  });
+  // Adds the agent key, or REPLACES the old one. Returns only a flag, never the key itself.
+  ipcMain.handle('agent:set-key', (_e, key) => {
+    const k = String(key || '').trim();
+    if (!k) throw new Error('The key is empty');
+    agentConfig.set({ agentApiKey: k });
+    worker.restart(); // reconnect with the new key
+    return { hasAgentKey: true };
+  });
   ipcMain.handle('agent:save-config', (_e, cfg) => {
     agentConfig.set(cleanAgentConfig(cfg));
     applyLoginItem();
@@ -173,6 +170,7 @@ function registerAgentIpc() {
   ipcMain.handle('agent:get-status', () => worker.getStatus());
   ipcMain.handle('agent:get-activity', () => worker.getActivity());
   ipcMain.handle('agent:get-printers', () => worker.getPrinterOverview());
+  ipcMain.handle('agent:test-print', (_e, name, mode) => worker.testPrint(String(name || ''), mode === 'bw' ? 'bw' : 'color'));
   ipcMain.handle('agent:sync-now', async () => {
     await worker.pollOnce();
     await worker.heartbeatOnce();
@@ -246,10 +244,17 @@ if (!gotLock) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     ipcMain.handle('printers:scan', () => scanPrinters());
-    registerUpdateIpc();
+    ipcMain.handle('update:get-state', () => updater.getState());
+    ipcMain.handle('update:install', () => updater.install());
     createWindow();
     startAgent();
-    updater.init({ onState: pushUpdateState, isBusy: worker.isBusy, log: logCrash });
+    updater.init({
+      onState: (state) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:state', state);
+      },
+      isBusy: () => worker.hasActivePrint(),
+      log: logCrash,
+    });
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -257,8 +262,8 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
-    updater.stop();
     worker.stop();
+    updater.stop();
   });
 
   app.on('window-all-closed', () => {

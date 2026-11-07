@@ -6,6 +6,9 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execFile } = require("child_process");
+const net = require("net");
+const crypto = require("crypto");
+const { imposeNUp, isPdf, SUPPORTED: NUP_SUPPORTED } = require("./nup");
 // Loaded lazily: pdf-to-printer only works on Windows, and the app must still start (mock mode) elsewhere.
 let pdfToPrinter = null;
 const pdf = () => (pdfToPrinter = pdfToPrinter || require("pdf-to-printer"));
@@ -145,6 +148,45 @@ async function removeJobs(printer, ids) {
         }
     }
 }
+/**
+ * The IP address + TCP port of a printer that uses a "Standard TCP/IP" port. null for USB / WSD / shared printers
+ * (there is nothing to ping) or when Windows can't tell us.
+ */
+async function getTcpEndpoint(printer) {
+    try {
+        const out = await runPowerShell(`$g = Get-Printer -Name '${psq(printer)}' -ErrorAction Stop; $pp = Get-PrinterPort -Name $g.PortName -ErrorAction Stop; if ($pp.PrinterHostAddress) { @{ host = [string]$pp.PrinterHostAddress; port = [int]$pp.PortNumber } | ConvertTo-Json -Compress }`);
+        if (!out)
+            return null;
+        const v = JSON.parse(out);
+        return v.host ? { host: String(v.host), port: Number(v.port) || 9100 } : null;
+    }
+    catch {
+        return null;
+    }
+}
+/** Can this PC open a connection to the printer right now? (The same check the Printers tab uses.) */
+function tcpReachable(host, port, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+        const sock = net.connect({ host, port });
+        const done = (ok) => {
+            sock.destroy();
+            resolve(ok);
+        };
+        sock.setTimeout(timeoutMs, () => done(false));
+        sock.once("connect", () => done(true));
+        sock.once("error", () => done(false));
+    });
+}
+/** Clears Windows' "Use Printer Offline" tick (needs rights on some PCs, so best effort). true = it is now off. */
+async function clearWorkOffline(printer) {
+    try {
+        const out = await runPowerShell(`$p = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq '${psq(printer)}' }; if ($p) { $p.WorkOffline = $false; Set-CimInstance -InputObject $p -ErrorAction Stop; $q = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq '${psq(printer)}' }; (-not $q.WorkOffline) } else { 'unknown' }`);
+        return out.toLowerCase() === "true";
+    }
+    catch {
+        return false;
+    }
+}
 const PRINTER_PROBLEMS = {
     paused: "is paused",
     offline: "is offline (switched off, asleep or not connected)",
@@ -153,17 +195,38 @@ const PRINTER_PROBLEMS = {
     dooropen: "has its cover/door open",
     notoner: "is out of toner/ink",
 };
-/** Refuses to start a job on a printer Windows already knows can't print. */
+/**
+ * Refuses to start a job on a printer Windows already knows can't print. Returns a note (or "") for the activity log.
+ *
+ * Network (TCP/IP) printers are special: Windows often says "Offline" / "Use Printer Offline" for a printer that is
+ * perfectly reachable on its IP address (typical when the same printer is also plugged in by USB, or its status
+ * polling hiccups). For those we trust a real connection test over Windows' flag, clear the flag and print.
+ */
 async function assertPrinterReady(printer) {
+    let note = "";
     try {
         const out = await runPowerShell(`Get-Printer -Name '${psq(printer)}' -ErrorAction Stop | Select-Object WorkOffline, @{n='S';e={[string]$_.PrinterStatus}} | ConvertTo-Json -Compress`);
         if (!out)
-            return;
+            return note;
         const st = JSON.parse(out);
+        const key = String(st.S ?? "").toLowerCase();
+        const windowsSaysOffline = !!st.WorkOffline || key === "offline";
+        if (windowsSaysOffline) {
+            const ep = await getTcpEndpoint(printer);
+            if (ep && (await tcpReachable(ep.host, ep.port))) {
+                const cleared = st.WorkOffline ? await clearWorkOffline(printer) : true;
+                if (st.WorkOffline && !cleared) {
+                    throw new PrintCheckError(`"${printer}" answers on ${ep.host}:${ep.port}, but Windows has it set to "Use Printer Offline" and the agent could not switch that off. ` +
+                        `Open the printer's queue -> Printer menu -> untick "Use Printer Offline" (or run the agent as administrator), then retry.`, false);
+                }
+                note = `Windows showed "${printer}" as offline, but it answers on ${ep.host}:${ep.port}, so the agent printed anyway${st.WorkOffline ? ' and switched off "Use Printer Offline"' : ""}.`;
+                console.log(note);
+                return note;
+            }
+        }
         if (st.WorkOffline) {
             throw new PrintCheckError(`"${printer}" is set to "Use Printer Offline". In Windows open the printer's queue -> Printer menu -> untick "Use Printer Offline", then retry.`, true);
         }
-        const key = String(st.S ?? "").toLowerCase();
         const problem = PRINTER_PROBLEMS[key];
         if (problem)
             throw new PrintCheckError(`"${printer}" ${problem}. Fix it and retry.`, key === "offline" || key === "paused");
@@ -173,6 +236,7 @@ async function assertPrinterReady(printer) {
             throw err;
         // Couldn't query the printer (old Windows / no permission) — carry on and rely on the queue check.
     }
+    return note;
 }
 const JOB_DONE = /printed|complete|retained/i; // job already finished (some drivers keep it listed)
 const JOB_STUCK = /error|offline|paperout|userintervention|blocked|paused|deleting/i;
@@ -210,25 +274,83 @@ async function verifyPrinted(printer, before) {
     throw new PrintCheckError(`Print job did not finish on "${printer}" within ${Math.round(VERIFY_MAX_MS / 60000 * 10) / 10} minutes (${lastStatus || "waiting"}). Check the printer and retry. The stuck job was cancelled.`, true);
 }
 /**
+ * A one-page PDF with solid red, green, blue, cyan, magenta, yellow, black and grey bars, built by hand so it needs no
+ * library. If a "colour" test print comes out grey, colour is being lost between Windows and this printer.
+ */
+function colourTestPdf() {
+    const bars = [
+        ["1 0 0", "Red"], ["0 0.7 0", "Green"], ["0 0 1", "Blue"], ["0 1 1", "Cyan"],
+        ["1 0 1", "Magenta"], ["1 1 0", "Yellow"], ["0 0 0", "Black"], ["0.5 0.5 0.5", "Grey"],
+    ];
+    let c = "BT /F1 20 Tf 50 790 Td (QRtoPrint colour test) Tj ET\nBT /F1 11 Tf 50 770 Td (Each bar should be a different colour. If they are all grey or black, colour is not reaching this printer.) Tj ET\n";
+    bars.forEach(([rgb, name], i) => {
+        const y = 700 - i * 70;
+        c += `${rgb} rg 50 ${y} 300 55 re f\n0 g BT /F1 14 Tf 365 ${y + 20} Td (${name}) Tj ET\n`;
+    });
+    const objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        `<< /Length ${Buffer.byteLength(c)} >>\nstream\n${c}endstream`,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ];
+    let pdf = "%PDF-1.4\n";
+    const offsets = [];
+    objs.forEach((o, i) => {
+        offsets.push(Buffer.byteLength(pdf));
+        pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = Buffer.byteLength(pdf);
+    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offsets.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("");
+    pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return Buffer.from(pdf, "latin1");
+}
+exports.colourTestPdf = colourTestPdf;
+/**
  * Saves the order's file to a temp path and sends it to the given Windows printer.
  * On Windows it then waits until the job has actually left the print queue, so "ready" means it printed.
  */
-async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, duplex, printType }) {
+async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, duplex, duplexEdge, pagesPerSheet, printType }) {
     const warnings = []; // non-fatal things worth showing in the activity log
     // "color" -> true, "bw" -> false, anything else (old callers) -> leave the printer's own setting alone.
     const wantColor = printType === "color" ? true : printType === "bw" ? false : null;
+    // Pages per sheet: lay the pages out ourselves (SumatraPDF can't), then print the result like any other PDF.
+    const perSheet = Number(pagesPerSheet) || 1;
+    if (perSheet > 1) {
+        if (!NUP_SUPPORTED.includes(perSheet)) {
+            warnings.push(`${perSheet} pages per sheet is not supported, so this order was printed with 1 page per sheet.`);
+        }
+        else if (!isPdf(fileBuffer)) {
+            warnings.push(`This file is not a PDF, so "${perSheet} pages per sheet" could not be applied. It was printed normally.`);
+        }
+        else {
+            try {
+                fileBuffer = await imposeNUp(fileBuffer, perSheet);
+                fileName = (fileName || "order.pdf").replace(/\.pdf$/i, "") + `-${perSheet}up.pdf`;
+            }
+            catch (err) {
+                // Printing it at full size would waste paper and not match what the customer paid for.
+                throw new Error(`Could not lay out ${perSheet} pages per sheet: ${err instanceof Error ? err.message : err}`);
+            }
+        }
+    }
+    const edge = duplexEdge === "short" ? "short" : "long";
     const tmpDir = path.join(os.tmpdir(), "qrtoprint-agent");
     if (!fs.existsSync(tmpDir))
         fs.mkdirSync(tmpDir, { recursive: true });
     const safeName = (fileName || "order.pdf").replace(/[^a-zA-Z0-9.\-_]/g, "_");
-    const filePath = path.join(tmpDir, `${Date.now()}-${safeName}`);
+    // Unique per job: two printers can start in the same millisecond with the same file name, and the first one to
+    // finish deletes its file - it must never be the file the other printer is still reading.
+    const filePath = path.join(tmpDir, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${safeName}`);
     fs.writeFileSync(filePath, fileBuffer);
     let restoreMode = null;
     let restoreColor = null;
     try {
         let before = new Set();
         if (IS_WIN) {
-            await assertPrinterReady(systemPrinterName);
+            const readyNote = await assertPrinterReady(systemPrinterName);
+            if (readyNote)
+                warnings.push(readyNote);
             before = new Set(((await listJobs(systemPrinterName)) ?? []).map((j) => j.id));
         }
         // Duplex: also set the Windows printer's own duplex mode (see helpers above) and restore it after the job.
@@ -239,10 +361,11 @@ async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, dup
                     `Device Settings and set "Duplex Unit" to Installed, or use a printer that has a duplex unit.`);
             }
             const previous = await getDuplexMode(systemPrinterName);
-            driverModeSet = await setDuplexMode(systemPrinterName, "TwoSidedLongEdge");
-            if (driverModeSet && previous && previous !== "TwoSidedLongEdge")
+            const wantMode = edge === "short" ? "TwoSidedShortEdge" : "TwoSidedLongEdge";
+            driverModeSet = await setDuplexMode(systemPrinterName, wantMode);
+            if (driverModeSet && previous && previous !== wantMode)
                 restoreMode = previous;
-            console.log(`Duplex job on "${systemPrinterName}": driver mode ${driverModeSet ? "set to TwoSidedLongEdge" : "could not be set (using Sumatra flag only)"}`);
+            console.log(`Duplex job on "${systemPrinterName}": driver mode ${driverModeSet ? "set to " + wantMode : "could not be set (using Sumatra flag only)"}`);
         }
         // Colour: switch the Windows printer to colour (or B&W) for this job and restore it afterwards.
         if (wantColor !== null && IS_WIN) {
@@ -253,6 +376,14 @@ async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, dup
             const colorSet = await setColorMode(systemPrinterName, wantColor);
             if (colorSet && prevColor !== null && prevColor !== wantColor)
                 restoreColor = prevColor;
+            // Read it back: some drivers accept the command but keep their own setting (usually Grayscale).
+            if (colorSet) {
+                const now = await getColorMode(systemPrinterName);
+                if (now !== null && now !== wantColor) {
+                    warnings.push(`Windows did not keep the ${wantColor ? "colour" : "B&W"} setting for "${systemPrinterName}" (it still reports ${now ? "Color" : "Grayscale"}). ` +
+                        `The driver is ignoring the request. Open the printer's Printing Preferences, set Color (untick "Print in grayscale" / "Black & white") and click Apply.`);
+                }
+            }
             if (!colorSet && wantColor) {
                 warnings.push(`Could not switch "${systemPrinterName}" to colour through Windows. If the pages still come out black & white, open the printer's Printing Preferences and set Color instead of Grayscale.`);
             }
@@ -265,7 +396,7 @@ async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, dup
                     copies: Math.max(1, copies || 1),
                     silent: true, // no SumatraPDF error pop-ups on the shop PC
                     // pdf-to-printer maps "side" to SumatraPDF's duplex setting ("duplexlong" = flip on long edge)
-                    side: duplex ? "duplexlong" : "simplex",
+                    side: duplex ? (edge === "short" ? "duplexshort" : "duplexlong") : "simplex",
                     // colour order -> colour, B&W order -> monochrome (pdf-to-printer passes this on to SumatraPDF)
                     ...(wantColor === null ? {} : { monochrome: !wantColor }),
                 });

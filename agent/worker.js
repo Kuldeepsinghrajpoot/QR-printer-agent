@@ -2,7 +2,7 @@
 const config = require('./config');
 const queue = require('./queue');
 const api = require('./api');
-const { printOrder, listSystemPrinters } = require('./printer');
+const { printOrder, listSystemPrinters, colourTestPdf } = require('./printer');
 const { scanPrinters, getCachedScan } = require('../scanner');
 const { getMachineInfo } = require('./machine');
 const { createHealthTracker } = require('./health');
@@ -100,6 +100,9 @@ async function syncPrintersOnce(list) {
   }
 }
 
+/** Last status each linked printer was reported with (online / offline / paper_jam ...), from the heartbeat. */
+const lastStatus = new Map();
+
 /** Manual mappings from settings win; auto-discovered ones fill the gaps. */
 function allMappings() {
   const manual = (config.get('printerMappings') || []).filter((m) => m.dbPrinterId && m.systemPrinterName);
@@ -112,8 +115,25 @@ function allMappings() {
   ];
 }
 
+/**
+ * Several printers can take the same order (say a TCP/IP printer and a USB printer, both of type "both"). Pick the
+ * best one instead of always the first: not offline / jammed / out of paper, then not printing right now, then the
+ * one with the fewest orders already given to it in this poll. A dedicated B&W/Color printer wins a tie.
+ * `load` counts orders already handed to each printer in this poll, so a batch spreads over the printers.
+ */
+function pickBest(candidates, load) {
+  const score = (m) => {
+    const st = lastStatus.get(m.systemPrinterName);
+    const unusable = st && st !== 'online' && st !== 'low_ink' ? 100 : 0; // offline, paper jam, out of paper
+    const busy = health.isBusy(m.systemPrinterName) ? 10 : 0;
+    const queued = (load.get(m.systemPrinterName) || 0) * 1;
+    return unusable + busy + queued + (m.type === 'both' ? 0.5 : 0);
+  };
+  return candidates.reduce((best, m) => (best === null || score(m) < score(best) ? m : best), null);
+}
+
 /** Picks which local (Windows) printer name an order should go to. */
-function resolvePrinterName(order) {
+function resolvePrinterName(order, load = new Map()) {
   const mappings = allMappings();
 
   if (order.printerId) {
@@ -126,11 +146,10 @@ function resolvePrinterName(order) {
   // Only ONE printer on this PC -> treat it as multifunction: it takes every order.
   if (mappings.length === 1) return mappings[0].systemPrinterName;
 
-  // B&W jobs -> a B&W printer, Color jobs -> a Color printer. A dedicated printer wins over a "both" printer.
-  const exact = mappings.find((m) => m.type === order.printType);
-  if (exact) return exact.systemPrinterName;
-  const both = mappings.find((m) => m.type === 'both');
-  if (both) return both.systemPrinterName;
+  // B&W jobs -> a B&W printer, Color jobs -> a Color printer ("both" printers can take either).
+  // With several candidates the best one wins (working, idle, least loaded) instead of always the first.
+  const candidates = mappings.filter((m) => m.type === order.printType || m.type === 'both');
+  if (candidates.length) return pickBest(candidates, load).systemPrinterName;
 
   // Default printer is only a last resort when no printers are mapped at all.
   if (mappings.length === 0) return config.get('defaultSystemPrinterName') || null;
@@ -188,8 +207,8 @@ async function safeReportStatus(orderId, printStatus, printerError) {
 
 const waitingLogged = new Set();
 
-async function processOrder(order) {
-  const systemPrinterName = resolvePrinterName(order);
+async function processOrder(order, assignedName) {
+  const systemPrinterName = assignedName !== undefined ? assignedName : resolvePrinterName(order);
 
   if (!systemPrinterName) {
     // No printer configured/assigned yet — leave it queued; the owner may assign one at any moment.
@@ -216,7 +235,11 @@ async function processOrder(order) {
   if (!claim.claimed) return;
 
   const modeText = order.printType === 'color' ? 'colour' : order.printType === 'bw' ? 'B&W' : '';
-  log(order.token, 'info', `Printing${modeText ? ' ' + modeText : ''} on ${systemPrinterName}${order.duplex ? ' (duplex)' : ''}…`);
+  const extras = [
+    order.duplex ? `duplex, ${order.duplexEdge === 'short' ? 'short' : 'long'} edge` : '',
+    Number(order.pagesPerSheet) > 1 ? `${order.pagesPerSheet} pages per sheet` : '',
+  ].filter(Boolean);
+  log(order.token, 'info', `Printing${modeText ? ' ' + modeText : ''} on ${systemPrinterName}${extras.length ? ' (' + extras.join(', ') + ')' : ''}…`);
   health.printStarted(systemPrinterName);
   let printed = false;
   try {
@@ -228,6 +251,8 @@ async function processOrder(order) {
       systemPrinterName,
       copies: order.copies,
       duplex: order.duplex,
+      duplexEdge: order.duplexEdge, // 'long' | 'short' - which edge the double-sided pages flip on
+      pagesPerSheet: order.pagesPerSheet, // 1, 2, 4, 6, 9 or 16 pages laid out on each sheet
       printType: order.printType, // 'color' | 'bw' - without this the printer used its own default (often grayscale)
     });
     for (const w of (result && result.warnings) || []) log(order.token, 'info', w);
@@ -248,8 +273,33 @@ async function processOrder(order) {
 let polling = false;
 
 /**
- * One full poll cycle: flush retries, then fetch and process new orders. Orders are grouped by the physical
- * printer they go to; groups run in parallel, orders for the SAME printer print one at a time, in order.
+ * Orders already handed to a printer (waiting for its turn, or printing): order id -> Windows printer name.
+ * Every printer has its OWN chain of work. A slow job on one printer (say the TCP/IP printer) must never make the
+ * other printer (say the USB one) wait, and the next poll must not hand the same order out a second time.
+ */
+const scheduled = new Map();
+const printerChains = new Map(); // printer name -> promise of the last order queued on it
+
+/** Queues the order on that printer's chain and returns at once. Orders on one printer print one after another. */
+function schedule(name, order) {
+  const id = String(order._id);
+  if (scheduled.has(id)) return;
+  scheduled.set(id, name);
+  const prev = printerChains.get(name) || Promise.resolve();
+  const next = prev
+    .then(() => processOrder(order, name))
+    .catch((err) => console.error(`Order ${order.token} failed unexpectedly:`, err instanceof Error ? err.message : err))
+    .then(() => {
+      scheduled.delete(id);
+      if (printerChains.get(name) === next) printerChains.delete(name);
+    });
+  printerChains.set(name, next);
+}
+
+/**
+ * One poll cycle: flush retries, fetch the queued orders and hand each one to its printer's chain. The cycle does NOT
+ * wait for the printing itself, so it ends quickly and the next poll can start orders for the other printers while
+ * the first printer is still busy. Orders for the SAME printer still print one at a time, in order.
  */
 async function pollOnce() {
   if (!config.get('agentApiKey')) return;
@@ -257,24 +307,41 @@ async function pollOnce() {
   polling = true;
   try {
     await flushPendingQueue();
-    if (Date.now() - lastPrinterSyncAt > 60000) await syncPrintersOnce();
-    const orders = await api.fetchQueuedOrders();
+    if (Date.now() - lastPrinterSyncAt > 60000) {
+      // The printer scan can take a while (USB devices make it slower). Orders must not wait for it, so it runs in the
+      // background, except on the very first run when there are no printer links yet and nothing could be printed.
+      const sync = syncPrintersOnce().catch(() => {});
+      lastPrinterSyncAt = Date.now(); // don't start another one while this runs
+      if (autoMappings.length === 0 && allMappings().length === 0) await sync;
+    }
+    // Orders already handed to a printer (still waiting for its turn or printing) are not handed out again.
+    const orders = (await api.fetchQueuedOrders()).filter((o) => !scheduled.has(String(o._id)));
 
     const groups = new Map();
+    const load = new Map(); // orders already given to each printer (earlier polls + this one)
+    for (const name of scheduled.values()) load.set(name, (load.get(name) || 0) + 1);
     for (const order of orders) {
-      const key = resolvePrinterName(order) || '__unassigned__';
+      const name = resolvePrinterName(order, load);
+      if (name) load.set(name, (load.get(name) || 0) + 1);
+      const key = name || '__unassigned__';
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(order);
     }
     // Orders assigned to a printer and still waiting (used to spot a printer that has work but is not performing it).
     const waiting = new Map();
     for (const [name, group] of groups) if (name !== '__unassigned__') waiting.set(name, group.map((o) => String(o._id)));
+    for (const [id, name] of scheduled) {
+      if (!waiting.has(name)) waiting.set(name, []);
+      waiting.get(name).push(id);
+    }
     health.observeQueue(waiting);
-    await Promise.all(
-      Array.from(groups.values()).map(async (group) => {
-        for (const order of group) await processOrder(order);
-      })
-    );
+    for (const [name, group] of groups) {
+      if (name === '__unassigned__') {
+        for (const order of group) await processOrder(order, null); // only logs "waiting for a printer" - instant
+      } else {
+        for (const order of group) schedule(name, order); // runs in the background, one chain per printer
+      }
+    }
 
     lastSyncAt = Date.now();
     lastError = null;
@@ -322,6 +389,7 @@ async function heartbeatOnce() {
         if (misses < OFFLINE_AFTER_MISSES) continue; // one-off glitch — keep the current status
         status = 'offline';
       }
+      lastStatus.set(name, status);
       try {
         await api.reportPrinterStatus(mapping.dbPrinterId, status, agentId);
       } catch (_) { /* best-effort; next beat retries */ }
@@ -364,8 +432,32 @@ function start() {
   emitStatus();
 }
 
+/** Prints the colour test page on one local printer, through the same path real orders use. */
+async function testPrint(systemPrinterName, mode) {
+  const printType = mode === 'bw' ? 'bw' : 'color';
+  const label = printType === 'color' ? 'colour' : 'B&W';
+  try {
+    const result = await printOrder({
+      fileBuffer: colourTestPdf(),
+      fileName: 'qrtoprint-colour-test.pdf',
+      systemPrinterName,
+      copies: 1,
+      duplex: false,
+      printType,
+    });
+    const warnings = (result && result.warnings) || [];
+    for (const w of warnings) log('', 'info', w);
+    log('', 'ok', `${label} test page printed on ${systemPrinterName}`);
+    return { ok: true, warnings };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Test print failed';
+    log('', 'error', `${label} test page failed on ${systemPrinterName}: ${message}`);
+    return { ok: false, message, warnings: [] };
+  }
+}
+
 module.exports = {
-  isBusy: () => health.isBusy(),
+  testPrint,
   start,
   stop,
   restart: start,
@@ -374,5 +466,6 @@ module.exports = {
   getStatus,
   getActivity,
   getPrinterOverview,
+  hasActivePrint: () => scheduled.size > 0,
   setStatusListener,
 };

@@ -110,9 +110,9 @@ function createHealthTracker(now = Date.now) {
       return { offline: false };
     },
 
-    /** True while this agent is printing an order (the updater waits for this to be false before restarting). */
-    isBusy() {
-      return active.size > 0;
+    /** True while this agent is running a print on that printer. Used to spread jobs over idle printers. */
+    isBusy(name) {
+      return isActive(name);
     },
 
     /** Read-only view (for the app's Printers tab): is this printer currently counted as offline by us? */

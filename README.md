@@ -44,6 +44,19 @@ npm run build
 
 The installer is created in the `dist` folder.
 
+## Publish an app update to GitHub
+
+The installed app checks GitHub Releases for newer versions. To publish an update:
+
+1. Make sure `Kuldeepsinghrajpoot/Agent-printer` has at least one commit and is public.
+2. Increase `version` in `package.json`.
+3. Set a GitHub token with permission to create releases as `GH_TOKEN`.
+4. Run `npm run release`.
+
+Electron Builder creates the Windows installer and updater metadata (`latest.yml`) in `dist` and uploads them to a GitHub Release. Do not upload a hand-written `latest.yml`; it contains hashes and filenames for that exact installer.
+
+Self-updates work in the installed Windows app, not in `npm start`. `npm run fake-update` previews the update button without publishing a release.
+
 ## How the Printers tab works
 
 `main.js` runs `scan.ps1` through Windows PowerShell and sends the JSON result to the window.
@@ -81,25 +94,26 @@ How "connected" is decided:
 
 On macOS/Linux (or with `PRINTER_MONITOR_MOCK=1`) the app shows sample data so the UI can be developed.
 
-## App updates (GitHub Releases)
+## Colour test page
 
-The window shows an **Update available** button in the top bar only when a newer version exists on GitHub; otherwise
-the button is hidden. Clicking it downloads the update, installs it silently and restarts the app (if an order is
-printing, it waits until that print is finished). The app checks 20 seconds after start and then every 4 hours; the
-tray icon also has **Check for updates**.
+If colour orders come out black & white, open the **Print Agent** tab and press **Test colour** next to the printer.
+It prints a page of coloured bars through exactly the same path real orders use. Grey bars mean the printer driver is
+ignoring the colour request: open the printer's *Printing Preferences*, set **Color** (untick "Print in grayscale" /
+"Black & white") and press Apply. The agent also logs a warning when Windows refuses to keep the colour setting.
+**Test B&W** prints the same page as a black & white job, for comparison.
 
-One-time setup
-1. In `package.json` -> `build.publish` replace `YOUR_GITHUB_USERNAME` and `YOUR_REPO_NAME` with your GitHub repo.
-   The repo (or at least its Releases) must be **public**: a private repo would need a token inside the app, which is unsafe.
-2. Run `npm install` (adds `electron-updater`).
-3. Install the app once from the new installer (`npm run build` -> `dist\Printer Monitor Setup x.y.z.exe`).
-   Older installs without this feature cannot update themselves.
+## TCP/IP printers that Windows shows as "Offline"
 
-Publishing an update
-1. Raise `version` in `package.json` (for example 1.0.0 -> 1.0.1).
-2. Create a GitHub personal access token with `repo` scope and set it: `set GH_TOKEN=ghp_xxx` (Windows cmd).
-3. Run `npm run release`. It builds the installer and uploads it and `latest.yml` to a new GitHub Release.
-   Every installed copy shows the Update button within 4 hours (or right after a restart / "Check for updates").
+Windows sometimes marks a network (TCP/IP) printer "Offline" or ticks "Use Printer Offline" even though it answers on its
+IP address (common when the same printer is also plugged in by USB, or after a driver status-polling hiccup). Before a job the
+agent now tests the printer's IP and port itself. If it answers, the agent clears the offline flag and prints, and writes a note
+in the Activity log. If the printer does not answer, or the printer is USB, the job is still refused with the same clear message.
 
-Testing the button without a release: `npm run fake-update` shows a fake "v9.9.9" update after 3 seconds and simulates the download.
-Updates only work in the installed Windows app, not in `npm start`.
+## Pages per sheet and flip edge
+
+Orders can ask for 2, 4, 6, 9 or 16 pages per sheet and for double-sided printing that flips on the long or the short edge.
+- **Pages per sheet** is done by the agent itself (`agent/nup.js`, uses the `pdf-lib` package): it lays the pages out on new sheets and
+  prints that PDF. 2-up and 6-up use a landscape sheet. Only PDFs can be laid out; other file types print normally and the Activity log says so.
+  Run `npm install` once after updating, because `pdf-lib` is a new dependency.
+- **Flip edge** sets Windows' duplex mode (`TwoSidedLongEdge` / `TwoSidedShortEdge`) and SumatraPDF's `duplexlong` / `duplexshort`.
+  Print one test sheet per printer first: some drivers treat long/short edge differently for landscape sheets (2-up, 6-up).

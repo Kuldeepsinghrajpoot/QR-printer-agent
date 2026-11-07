@@ -266,19 +266,5 @@ button.small:hover { border-color: var(--accent); }
 
 .machine { margin-top: 6px; font-weight: 600; color: var(--text); }
 
-/* ---------- App update button (shown only while an update is available) ---------- */
-.topbar-right { display: flex; align-items: center; gap: 16px; }
-.update-btn {
-  background: var(--good-bg);
-  color: var(--good);
-  border: 1px solid var(--good);
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-weight: 600;
-}
-.update-btn:hover:not(:disabled) { filter: brightness(1.08); }
-.update-btn:disabled { cursor: progress; opacity: .85; }
-.update-btn[data-state="error"] { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
-.update-btn[data-state="downloading"],
-.update-btn[data-state="waiting"],
-.update-btn[data-state="installing"] { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+/* Agent key: shown as a status line once added (the key itself is never displayed) */
+.key-submitted { display: flex; align-items: center; gap: 12px; }

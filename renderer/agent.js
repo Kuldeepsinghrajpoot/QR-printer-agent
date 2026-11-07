@@ -52,7 +52,7 @@
     const dot = $('agentDot');
     let label, tone, text = '';
     if (!status.configured) {
-      label = 'Not set up'; tone = 'muted'; text = 'Enter the server URL and agent key below.';
+      label = 'Not set up'; tone = 'muted'; text = 'Add the agent key below.';
     } else if (status.lastError) {
       label = 'Connection problem'; tone = 'bad'; text = status.lastError;
     } else if (status.lastSyncAt) {
@@ -96,6 +96,27 @@
         .join(' · ');
       if (where) grow.appendChild(h('div', 'meta', 'Port: ' + where));
       row.appendChild(grow);
+      // Test pages: print the colour bars as a colour job / as a B&W job, to see what this printer really does.
+      [['color', 'Test colour'], ['bw', 'Test B&W']].forEach(([mode, text]) => {
+        const b = h('button', 'small', text);
+        b.type = 'button';
+        b.title = 'Prints one test page on ' + p.systemPrinterName;
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          const old = b.textContent;
+          b.textContent = 'Printing…';
+          try {
+            const r = await api.testPrint(p.systemPrinterName, mode);
+            showMsg(r.ok ? (r.warnings.length ? 'Test page sent. ' + r.warnings.join(' ') : 'Test page sent to ' + p.systemPrinterName + '.') : r.message, !r.ok || r.warnings.length > 0);
+          } catch (_) {
+            showMsg('Could not print the test page.', true);
+          }
+          b.textContent = old;
+          b.disabled = false;
+          refreshLive();
+        });
+        row.appendChild(b);
+      });
       row.appendChild(h('span', 'pill ' + tone, label));
       box.appendChild(row);
     });
@@ -203,17 +224,48 @@
   });
 
   // ---------- form ----------
-  $('toggleKey').addEventListener('click', () => {
-    const input = $('agentApiKey');
-    const show = input.type === 'password';
-    input.type = show ? 'text' : 'password';
-    $('toggleKey').textContent = show ? 'Hide' : 'Show';
+  // The agent key is write-only: the window only ever knows IF a key was added, never what it is.
+  let hasKey = false;
+  function renderKey(editing) {
+    const showEntry = !hasKey || editing;
+    $('keySubmitted').classList.toggle('hidden', showEntry);
+    $('keyEntry').classList.toggle('hidden', !showEntry);
+    $('cancelKey').classList.toggle('hidden', !hasKey); // Cancel only exists while replacing an old key
+    $('addKey').textContent = hasKey ? 'Save new key' : 'Add key';
+    if (!showEntry) $('agentApiKey').value = '';
+  }
+
+  $('replaceKey').addEventListener('click', () => {
+    renderKey(true);
+    $('agentApiKey').focus();
+  });
+  $('cancelKey').addEventListener('click', () => renderKey(false));
+
+  $('addKey').addEventListener('click', async () => {
+    const key = $('agentApiKey').value.trim();
+    if (!key) {
+      showMsg('Paste the agent key first.', true);
+      return;
+    }
+    const replacing = hasKey;
+    const btn = $('addKey');
+    btn.disabled = true;
+    try {
+      await api.setKey(key);
+      $('agentApiKey').value = ''; // the key never stays on screen
+      hasKey = true;
+      renderKey(false);
+      showMsg(replacing ? 'New key saved - the old key was replaced.' : 'Key submitted.', false);
+      setTimeout(() => { refreshLive(); refreshPrinters(); }, 2500);
+    } catch (err) {
+      showMsg('Could not save the key: ' + err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   $('saveAgent').addEventListener('click', async () => {
     const cfg = {
-      serverUrl: $('serverUrl').value.trim(),
-      agentApiKey: $('agentApiKey').value.trim(),
       pollIntervalSeconds: Number($('pollIntervalSeconds').value) || 5,
       heartbeatIntervalSeconds: Number($('heartbeatIntervalSeconds').value) || 30,
       defaultSystemPrinterName: $('defaultSystemPrinterName').value,
@@ -237,7 +289,7 @@
       const status = await api.syncNow();
       renderStatus(status);
       await Promise.all([refreshLive(), refreshPrinters()]);
-      if (!status.configured) showMsg('Enter the agent key first, then save.', true);
+      if (!status.configured) showMsg('Add the agent key first.', true);
       else if (status.lastError) showMsg(status.lastError, true);
       else showMsg('Synced successfully.', false);
     } catch (err) {
@@ -251,8 +303,8 @@
   // ---------- init ----------
   async function init() {
     const cfg = await api.getConfig();
-    $('serverUrl').value = cfg.serverUrl || '';
-    $('agentApiKey').value = cfg.agentApiKey || '';
+    hasKey = !!cfg.hasAgentKey;
+    renderKey(false);
     $('pollIntervalSeconds').value = cfg.pollIntervalSeconds || 5;
     $('heartbeatIntervalSeconds').value = cfg.heartbeatIntervalSeconds || 30;
     $('autoStartOnLogin').checked = !!cfg.autoStartOnLogin;
@@ -265,7 +317,7 @@
       $('machineInfo').textContent = 'This computer: ' + m.hostname + (m.username ? ' · User: ' + m.username : '') + ' · ' + model + ' · ID ' + m.id.slice(0, 8);
     }).catch(() => {});
     renderStatus(await api.getStatus());
-    if (!cfg.agentApiKey) setTab('agent'); // first run: go straight to the setup form
+    if (!cfg.hasAgentKey) setTab('agent'); // first run: go straight to the setup form
   }
 
   api.onStatus((status) => {
