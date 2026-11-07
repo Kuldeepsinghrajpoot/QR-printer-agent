@@ -1,0 +1,56 @@
+{
+  "name": "printer-monitor",
+  "version": "1.0.0",
+  "description": "Windows Electron app: printer monitor (connection, paper, toner) + Print Agent that prints paid orders automatically",
+  "main": "main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "mock": "set PRINTER_MONITOR_MOCK=1&& electron .",
+    "build": "electron-builder --win",
+    "release": "electron-builder --win --publish always",
+    "fake-update": "set PRINTER_MONITOR_FAKE_UPDATE=1&& electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.example.printermonitor",
+    "productName": "Printer Monitor",
+    "files": [
+      "main.js",
+      "preload.js",
+      "scanner.js",
+      "scan.ps1",
+      "agent/**/*",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "asarUnpack": [
+      "node_modules/pdf-to-printer/dist/**"
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Kuldeepsinghrajpoot",
+        "repo": "Agent-printer.git",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "pdf-to-printer": "^5.8.1",
+    "electron-updater": "^6.6.2"
+  }
+}

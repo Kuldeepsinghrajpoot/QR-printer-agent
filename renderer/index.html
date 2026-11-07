@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Printer Monitor + Print Agent</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Printer Monitor <span class="plus">+ Print Agent</span></h1>
+      <p class="sub" id="lastScan">Not scanned yet</p>
+    </div>
+    <div class="topbar-right">
+      <!-- Hidden unless a newer version is on GitHub (see update.js) -->
+      <button id="updateBtn" class="update-btn hidden" type="button"></button>
+      <div class="actions monitor-only">
+        <label class="toggle">
+          <input type="checkbox" id="autoRefresh" />
+          <span>Auto-refresh (30s)</span>
+        </label>
+        <button id="refreshBtn" class="primary">Scan printers</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="monitor" type="button">Printers</button>
+    <button class="tab" data-tab="agent" type="button">Print Agent <span class="dot muted" id="agentDot"></span></button>
+  </nav>
+
+  <main id="tab-monitor">
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="summary" id="summary">
+      <div class="stat"><span class="num" id="statInstalled">–</span><span class="lbl">Installed</span></div>
+      <div class="stat"><span class="num good" id="statConnected">–</span><span class="lbl">Connected</span></div>
+      <div class="stat"><span class="num bad" id="statDisconnected">–</span><span class="lbl">Disconnected</span></div>
+      <div class="stat"><span class="num muted" id="statVirtual">–</span><span class="lbl">Virtual</span></div>
+      <div class="stat"><span class="num warn" id="statIssues">–</span><span class="lbl">Need attention</span></div>
+    </section>
+
+    <nav class="filters" id="filters">
+      <button data-filter="all" class="chip active">All</button>
+      <button data-filter="physical" class="chip">Physical</button>
+      <button data-filter="connected" class="chip">Connected</button>
+      <button data-filter="disconnected" class="chip">Disconnected</button>
+      <button data-filter="virtual" class="chip">Virtual</button>
+      <button data-filter="issues" class="chip">Need attention</button>
+    </nav>
+
+    <section id="list" class="list" aria-live="polite"></section>
+
+    <p class="note">
+      Paper and toner status come from what each printer driver reports to Windows. Many printers
+      only report paper problems (low, out, jam) and not an exact level; "Not reported" means the
+      driver gave no information.
+    </p>
+  </main>
+
+  <main id="tab-agent" class="hidden">
+    <section class="panel agent-head">
+      <div>
+        <h2>Print Agent</h2>
+        <p class="sub">Prints paid orders automatically and reports real printer health (offline, jam, out of paper, low ink) to your dashboard.</p>
+        <p class="sub machine" id="machineInfo"></p>
+      </div>
+      <div class="agent-status">
+        <span class="pill muted" id="agentPill">Checking…</span>
+        <span class="sub" id="agentDetail"></span>
+      </div>
+    </section>
+
+    <div id="agentMsg" class="banner hidden"></div>
+
+    <div class="agent-grid">
+      <section class="panel">
+        <h3>Server connection</h3>
+        <label class="f" for="serverUrl">Dashboard server URL</label>
+        <input id="serverUrl" type="text" placeholder="https://your-shop.vercel.app" />
+        <label class="f" for="agentApiKey">Agent API key</label>
+        <div class="keywrap">
+          <input id="agentApiKey" type="password" placeholder="Paste AGENT_API_KEY from the server settings" />
+          <button type="button" class="small" id="toggleKey">Show</button>
+        </div>
+        <p class="hint">Must exactly match <b>AGENT_API_KEY</b> on the server (Vercel &rarr; Environment Variables).</p>
+
+        <h3>Timing</h3>
+        <div class="grid2">
+          <div>
+            <label class="f" for="pollIntervalSeconds">Check orders (sec)</label>
+            <input id="pollIntervalSeconds" type="number" min="3" />
+          </div>
+          <div>
+            <label class="f" for="heartbeatIntervalSeconds">Printer status (sec)</label>
+            <input id="heartbeatIntervalSeconds" type="number" min="10" />
+          </div>
+        </div>
+
+        <h3>Startup</h3>
+        <label class="check"><input type="checkbox" id="autoStartOnLogin" /> Start automatically when this PC turns on</label>
+        <p class="hint">Closing the window keeps the agent running in the system tray. Use the tray icon &rarr; Quit to stop it.</p>
+
+        <details>
+          <summary>Advanced: manual printer linking</summary>
+          <p class="hint">Only if a printer isn't linked automatically. Paste its Printer ID from the dashboard.</p>
+          <div id="agentMappings"></div>
+          <button class="small" id="addMapping" type="button">+ Add manual link</button>
+          <label class="f" for="defaultSystemPrinterName">Fallback printer (only if none linked)</label>
+          <select id="defaultSystemPrinterName"></select>
+        </details>
+
+        <div class="agent-actions">
+          <button class="primary" id="saveAgent" type="button">Save &amp; restart agent</button>
+          <button class="small" id="syncNow" type="button">Sync now</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Printers on this PC</h3>
+        <p class="hint">B&amp;W orders go to a B&amp;W printer, Color orders to a Color printer. Set each printer's type in the dashboard &rarr; Printers.</p>
+        <div id="agentPrinters" class="agent-list"></div>
+
+        <h3>Recent activity</h3>
+        <div id="activityList" class="agent-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="renderer.js"></script>
+  <script src="agent.js"></script>
+  <script src="update.js"></script>
+</body>
+</html>
