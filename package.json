@@ -44,7 +44,7 @@
       {
         "provider": "github",
         "owner": "Kuldeepsinghrajpoot",
-        "repo": "Agent-printer.git",
+        "repo": "Agent-printer",
         "releaseType": "release"
       }
     ]
