@@ -95,6 +95,10 @@
         .filter(Boolean)
         .join(' · ');
       if (where) grow.appendChild(h('div', 'meta', 'Port: ' + where));
+      // What Windows says the printer can do, and a warning when the dashboard type disagrees with it.
+      grow.appendChild(h('div', 'meta', 'Detected: ' + (p.colorCapable === true ? 'B&W + Colour' : p.colorCapable === false ? 'B&W only' : 'unknown (Windows did not say)')));
+      if (p.linked && p.colorCapable === false && p.type !== 'bw') grow.appendChild(h('div', 'meta warn-line', '⚠ This printer is B&W only - set its type to B&W in the dashboard → Printers.'));
+      if (p.linked && p.colorCapable === true && p.type === 'bw') grow.appendChild(h('div', 'meta warn-line', 'ℹ This printer can print colour - it is set to B&W only in the dashboard.'));
       row.appendChild(grow);
       // Test pages: print the colour bars as a colour job / as a B&W job, to see what this printer really does.
       [['color', 'Test colour'], ['bw', 'Test B&W']].forEach(([mode, text]) => {

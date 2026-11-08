@@ -87,6 +87,8 @@ async function syncPrintersOnce(list) {
           ? {
               portType: p.scan.portType || undefined,
               driver: p.scan.driver || undefined,
+              // true = Windows says it prints colour, false = B&W only; left out when Windows couldn't tell
+              ...(typeof p.scan.colorCapable === 'boolean' ? { colorCapable: p.scan.colorCapable } : {}),
             }
           : {}),
       })),
@@ -172,6 +174,7 @@ async function getPrinterOverview() {
       systemPrinterName: p.name,
       type: m ? m.type : null,
       linked: !!m,
+      colorCapable: p.scan && typeof p.scan.colorCapable === 'boolean' ? p.scan.colorCapable : null,
       status,
       detail,
       port: p.scan ? p.scan.port : '',

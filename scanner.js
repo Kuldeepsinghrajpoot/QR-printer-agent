@@ -25,8 +25,8 @@ function mockScan() {
     scannedAt: new Date().toISOString(),
     spooler: 'Running',
     printers: [
-      { ...base, name: 'HP LaserJet Pro M404', port: 'IP_192.168.1.20', portType: 'Network (TCP/IP)', ipAddress: '192.168.1.20', tcpPort: 9100, isDefault: true, isVirtual: false, connection: 'connected', detail: 'Reachable at 192.168.1.20:9100', status: 'Idle', paperLevel: 'ok' },
-      { ...base, name: 'Canon PIXMA G3010', port: 'USB001', portType: 'USB', isDefault: false, isVirtual: false, connection: 'connected', detail: 'USB device detected', status: 'Printing', paperLevel: 'low', errors: ['Low paper'], jobs: 2 },
+      { ...base, name: 'HP LaserJet Pro M404', port: 'IP_192.168.1.20', portType: 'Network (TCP/IP)', ipAddress: '192.168.1.20', tcpPort: 9100, isDefault: true, isVirtual: false, colorCapable: false, connection: 'connected', detail: 'Reachable at 192.168.1.20:9100', status: 'Idle', paperLevel: 'ok' },
+      { ...base, name: 'Canon PIXMA G3010', port: 'USB001', portType: 'USB', isDefault: false, isVirtual: false, colorCapable: true, connection: 'connected', detail: 'USB device detected', status: 'Printing', paperLevel: 'low', errors: ['Low paper'], jobs: 2 },
       { ...base, name: 'Epson L3150 (office)', port: 'WSD-1234', portType: 'Network (WSD)', isDefault: false, isVirtual: false, connection: 'disconnected', detail: 'Windows reports the printer as offline', status: 'Offline', paperLevel: 'unknown' },
       { ...base, name: 'Brother HL-L2350DW', port: 'IP_192.168.1.31', portType: 'Network (TCP/IP)', ipAddress: '192.168.1.31', tcpPort: 9100, isDefault: false, isVirtual: false, connection: 'connected', detail: 'Reachable at 192.168.1.31:9100', status: 'Idle', paperLevel: 'empty', tonerLevel: 'low', errors: ['Out of paper', 'Low toner'] },
       { ...base, name: 'Microsoft Print to PDF', port: 'PORTPROMPT:', portType: 'Virtual', isDefault: false, isVirtual: true, connection: 'virtual', detail: 'Virtual printer (no physical device)', status: 'Ready', paperLevel: 'na', tonerLevel: 'na' },

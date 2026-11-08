@@ -271,3 +271,8 @@ button.small:hover { border-color: var(--accent); }
 
 #checkUpdate { color: var(--accent); }
 #updateNote { margin-left: 6px; }
+
+.warn-line { color: #f5a524; }
+
+#updateBtn:disabled { opacity: .55; cursor: default; }
+#updateBtn[data-state="available"], #updateBtn[data-state="error"] { border-color: var(--accent); }

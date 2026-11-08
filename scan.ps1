@@ -79,6 +79,29 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
     # --- virtual printers (PDF, XPS, OneNote, Fax ...) ---
     $isVirtual = ($port -match '^(PORTPROMPT:|nul:|SHRFAX:|FILE:|XPSPort:|HPSmartPrintingPort)') -or (("$name $driver") -match 'PDF|XPS Document|OneNote|Fax|HP Smart Printing|Snagit|Webex|Zoom')
 
+    # --- colour support ---
+    # 1) Win32_Printer.Capabilities: 2 = Color Printing (cheap; the driver's own list).
+    # 2) When that list is empty (class / IPP / WSD drivers often leave it empty), ask the driver's print capabilities
+    #    (what the Windows print dialog uses): OutputColorCapability lists Color / Grayscale / Monochrome.
+    # $null = Windows could not tell (the dashboard then keeps whatever the shop set).
+    $colorCapable = $null
+    if (-not $isVirtual) {
+        $caps = @($p.Capabilities | Where-Object { $_ -ne $null })
+        if ($caps.Count -gt 0) { $colorCapable = ($caps -contains 2) }
+        if ($colorCapable -ne $true) {
+            try {
+                if (-not $script:printSrv) {
+                    Add-Type -AssemblyName System.Printing
+                    $script:printSrv = New-Object System.Printing.LocalPrintServer
+                }
+                $q = $script:printSrv.GetPrintQueue($name)
+                $oc = @($q.GetPrintCapabilities().OutputColorCapability | ForEach-Object { [string]$_ })
+                if ($oc -contains 'Color') { $colorCapable = $true }
+                elseif ($oc.Count -gt 0 -and $colorCapable -eq $null) { $colorCapable = $false }
+            } catch { }
+        }
+    }
+
     # --- connection type ---
     $ip = ''
     $urlPort = 0
@@ -240,6 +263,7 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         tonerLevel  = $toner
         errors      = [string[]]@($errs)
         jobs        = [int]$jobs
+        colorCapable = $colorCapable
         location    = [string]$p.Location
         comment     = [string]$p.Comment
     }

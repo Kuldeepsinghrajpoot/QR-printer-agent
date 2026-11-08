@@ -1,6 +1,6 @@
 {
   "name": "printer-monitor",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "description": "Windows Electron app: printer monitor (connection, paper, toner) + Print Agent that prints paid orders automatically",
   "main": "main.js",
   "author": "",

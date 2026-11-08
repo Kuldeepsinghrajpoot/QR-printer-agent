@@ -274,18 +274,18 @@ async function verifyPrinted(printer, before) {
     throw new PrintCheckError(`Print job did not finish on "${printer}" within ${Math.round(VERIFY_MAX_MS / 60000 * 10) / 10} minutes (${lastStatus || "waiting"}). Check the printer and retry. The stuck job was cancelled.`, true);
 }
 /**
- * A one-page PDF with solid red, green, blue, cyan, magenta, yellow, black and grey bars, built by hand so it needs no
- * library. If a "colour" test print comes out grey, colour is being lost between Windows and this printer.
+ * A tiny test page: four small swatches (cyan, magenta, yellow, black) in one row near the top, built by hand so it
+ * needs no library. It uses only a little ink. If the coloured swatches come out grey or black, colour is being
+ * lost between Windows and this printer.
  */
 function colourTestPdf() {
-    const bars = [
-        ["1 0 0", "Red"], ["0 0.7 0", "Green"], ["0 0 1", "Blue"], ["0 1 1", "Cyan"],
-        ["1 0 1", "Magenta"], ["1 1 0", "Yellow"], ["0 0 0", "Black"], ["0.5 0.5 0.5", "Grey"],
+    const swatches = [
+        ["0 1 1", "Cyan"], ["1 0 1", "Magenta"], ["1 1 0", "Yellow"], ["0 0 0", "Black"],
     ];
-    let c = "BT /F1 20 Tf 50 790 Td (QRtoPrint colour test) Tj ET\nBT /F1 11 Tf 50 770 Td (Each bar should be a different colour. If they are all grey or black, colour is not reaching this printer.) Tj ET\n";
-    bars.forEach(([rgb, name], i) => {
-        const y = 700 - i * 70;
-        c += `${rgb} rg 50 ${y} 300 55 re f\n0 g BT /F1 14 Tf 365 ${y + 20} Td (${name}) Tj ET\n`;
+    let c = "BT /F1 12 Tf 50 800 Td (QRtoPrint colour test) Tj ET\nBT /F1 8 Tf 50 788 Td (If these squares are all grey or black, colour is not reaching this printer.) Tj ET\n";
+    swatches.forEach(([rgb, name], i) => {
+        const x = 50 + i * 70;
+        c += `${rgb} rg ${x} 760 24 16 re f\n0 g BT /F1 8 Tf ${x} 750 Td (${name}) Tj ET\n`;
     });
     const objs = [
         "<< /Type /Catalog /Pages 2 0 R >>",
