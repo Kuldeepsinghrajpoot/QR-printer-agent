@@ -62,7 +62,7 @@ async function physicalPrinters() {
 function dashboardStatus(scan) {
   if (scan.connection === 'disconnected') return 'offline';
   if (scan.paperLevel === 'jam') return 'paper_jam';
-  if (scan.paperLevel === 'empty') return 'out_of_paper';
+  if (scan.paperLevel === 'empty' || scan.paperLevel === 'problem') return 'out_of_paper';
   if (scan.tonerLevel === 'low' || scan.tonerLevel === 'empty') return 'low_ink';
   return 'online';
 }

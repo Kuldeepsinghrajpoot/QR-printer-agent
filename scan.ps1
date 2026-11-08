@@ -213,21 +213,47 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
     if ($isVirtual) { $statusText = 'Ready' }
     elseif ($connection -eq 'disconnected') { $statusText = 'Offline' }
 
+    $jobList = @(Get-PrintJob -PrinterName $name)
+
     # --- paper / toner / errors ---
     $paper = 'unknown'
     $toner = 'unknown'
     $errs = New-Object System.Collections.ArrayList
 
     if ($isVirtual) { $paper = 'na'; $toner = 'na' }
-    elseif ($connection -ne 'disconnected') {
+    else {
         $codes = @()
         if ($p.DetectedErrorState -ne $null) { $codes += [int]$p.DetectedErrorState }
         if ($p.ExtendedDetectedErrorState -ne $null) { $codes += [int]$p.ExtendedDetectedErrorState }
 
-        $jam = ($codes -contains 8) -or ($gpStatus -eq 'PaperJam')
-        $out = ($codes -contains 4) -or ($gpStatus -eq 'PaperOut')
+        # Many USB / inkjet drivers never fill DetectedErrorState or Get-Printer's status. Two more places Windows
+        # records the same problem: the old PrinterState / ExtendedPrinterStatus numbers, and the status of the jobs
+        # waiting in this printer's queue (a job stuck with PaperOut / UserIntervention / Error means the printer
+        # refused it).
+        $legacy = -1
+        if ($p.PrinterState -ne $null) { $legacy = [int]$p.PrinterState }
+        $ext = -1
+        if ($p.ExtendedPrinterStatus -ne $null) { $ext = [int]$p.ExtendedPrinterStatus }
+        $jobText = (@($jobList | ForEach-Object { [string]$_.JobStatus }) -join ' ')
+
+        $jam = ($codes -contains 8) -or ($gpStatus -eq 'PaperJam') -or ($legacy -eq 4)
+        $out = ($codes -contains 4) -or ($gpStatus -eq 'PaperOut') -or ($legacy -eq 5) -or ($jobText -match 'PaperOut')
         $low = ($codes -contains 3)
-        $prob = ($gpStatus -eq 'PaperProblem')
+        $prob = ($gpStatus -eq 'PaperProblem') -or ($legacy -eq 7) -or ($jobText -match 'UserIntervention')
+        if ($legacy -eq 17 -and ($errs -notcontains 'Door open')) { [void]$errs.Add('Door open') }
+        if ($legacy -eq 16 -and ($errs -notcontains 'Printer out of memory')) { [void]$errs.Add('Printer out of memory') }
+        if ($jam -and ($errs -notcontains 'Paper jam')) { [void]$errs.Add('Paper jam') }
+        if ($out -and ($errs -notcontains 'Out of paper')) { [void]$errs.Add('Out of paper') }
+        if ($prob -and -not $jam -and -not $out -and ($errs -notcontains 'Paper problem')) { [void]$errs.Add('Paper problem') }
+        if (($legacy -eq 2 -or $ext -eq 9 -or $jobText -match 'Error') -and -not $jam -and -not $out -and -not $prob -and $errs.Count -eq 0) { [void]$errs.Add('Printer error') }
+
+        # A jam / empty tray makes Windows flag many USB printers "offline". When the only reason for "disconnected" is
+        # that Windows flag (not a failed network check or a missing USB device), show the real problem instead.
+        if ($connection -eq 'disconnected' -and ($jam -or $out) -and $detail -like 'Windows reports*') {
+            $connection = 'connected'
+            if ($jam) { $detail = 'Paper jam (Windows shows the printer as offline)' } else { $detail = 'Out of paper (Windows shows the printer as offline)' }
+            $statusText = 'Error'
+        }
 
         if ($jam) { $paper = 'jam' }
         elseif ($out) { $paper = 'empty' }
@@ -244,7 +270,7 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         if ($gpErrMap.ContainsKey($gpStatus) -and ($errs -notcontains $gpErrMap[$gpStatus])) { [void]$errs.Add($gpErrMap[$gpStatus]) }
     }
 
-    $jobs = @(Get-PrintJob -PrinterName $name).Count
+    $jobs = $jobList.Count
 
     $results += [pscustomobject]@{
         name        = $name
