@@ -1,4 +1,4 @@
-# Printer Monitor + Print Agent
+# QRtoPrint Agent - Powered by Lexical Software
 
 One Windows app with two jobs:
 

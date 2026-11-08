@@ -4,14 +4,15 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Printer Monitor + Print Agent</title>
+  <title>QRtoPrint Agent - Powered by Lexical Software</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>Printer Monitor <span class="plus">+ Print Agent</span></h1>
+      <h1>QRtoPrint <span class="plus">Powered by Lexical Software</span></h1>
       <p class="sub" id="lastScan">Not scanned yet</p>
+      <p class="sub"><span id="appVer"></span> · <a href="#" id="checkUpdate">Check for updates</a> <span id="updateNote"></span></p>
     </div>
     <div class="actions monitor-only">
       <button id="updateBtn" class="small hidden" type="button"></button>

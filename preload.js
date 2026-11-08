@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('printerAPI', {
 contextBridge.exposeInMainWorld('updateAPI', {
   getState: () => ipcRenderer.invoke('update:get-state'),
   install: () => ipcRenderer.invoke('update:install'),
+  check: () => ipcRenderer.invoke('update:check'),
   onState: (cb) => ipcRenderer.on('update:state', (_event, state) => cb(state)),
 });
 

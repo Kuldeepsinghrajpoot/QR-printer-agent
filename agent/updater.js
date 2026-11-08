@@ -20,7 +20,7 @@ const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 const IDLE_RECHECK_MS = 2000;
 
 let autoUpdater = null;
-let state = { state: 'none', version: '', percent: 0, error: '' };
+let state = { state: 'none', version: '', percent: 0, error: '', current: '', note: '' };
 let onState = () => {};
 let isBusy = () => false;
 let log = () => {};
@@ -68,6 +68,26 @@ async function check() {
   return state;
 }
 
+/** "Check for updates" link: always tells the user what happened (up to date / found / why it could not check). */
+async function checkNow() {
+  if (inProgress()) return state;
+  if (FAKE) { setState({ note: 'Test mode (fake update)' }); return state; }
+  if (!app.isPackaged) { setState({ note: 'Updates only work in the installed app (this is a dev run)' }); return state; }
+  if (process.platform !== 'win32') { setState({ note: 'Updates only work on Windows' }); return state; }
+  if (!autoUpdater) { setState({ note: 'Updater is not available in this build' }); return state; }
+  setState({ note: 'Checking…' });
+  try {
+    const res = await autoUpdater.checkForUpdates();
+    const latest = res && res.updateInfo && res.updateInfo.version;
+    if (res && res.isUpdateAvailable) setState({ note: '' }); // the 'available' state shows the button
+    else setState({ note: "You're up to date" + (latest ? ' (latest on GitHub: v' + latest + ')' : '') });
+  } catch (err) {
+    log('Manual update check failed: ' + ((err && err.message) || err));
+    setState({ note: 'Could not check: ' + friendlyError(err).replace(/ - click to retry/, '') + ' - ' + String((err && err.message) || '').split('\n')[0].slice(0, 160) });
+  }
+  return state;
+}
+
 /** The button was clicked: download the update, then install it. */
 async function install() {
   if (inProgress()) return state;
@@ -102,6 +122,7 @@ async function install() {
  * opts: onState(state) -> push to the window, isBusy() -> true while an order is printing, log(message).
  */
 function init(opts = {}) {
+  state.current = app.getVersion();
   onState = opts.onState || onState;
   isBusy = opts.isBusy || isBusy;
   log = opts.log || log;
@@ -110,7 +131,10 @@ function init(opts = {}) {
     firstTimer = setTimeout(() => setState({ state: 'available', version: '9.9.9' }), 3000);
     return;
   }
-  if (!app.isPackaged || process.platform !== 'win32') return; // only the installed Windows app can update itself
+  if (!app.isPackaged || process.platform !== 'win32') {
+    log('Auto-update disabled: packaged=' + app.isPackaged + ' platform=' + process.platform);
+    return;
+  } // only the installed Windows app can update itself
 
   try {
     ({ autoUpdater } = require('electron-updater'));
@@ -122,10 +146,12 @@ function init(opts = {}) {
   autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('update-available', (info) => {
+    log('Update found on GitHub: v' + ((info && info.version) || '?') + ' (installed v' + app.getVersion() + ')');
     if (inProgress()) return;
     setState({ state: 'available', version: (info && info.version) || '', percent: 0, error: '' });
   });
-  autoUpdater.on('update-not-available', () => {
+  autoUpdater.on('update-not-available', (info) => {
+    log('No newer release (installed v' + app.getVersion() + ', GitHub latest v' + ((info && info.version) || '?') + ')');
     if (!inProgress()) setState({ state: 'none', version: '', error: '' });
   });
   autoUpdater.on('download-progress', (p) => setState({ state: 'downloading', percent: Math.round((p && p.percent) || 0) }));
@@ -141,6 +167,7 @@ function init(opts = {}) {
     }
   });
 
+  log('Auto-update ready: installed v' + app.getVersion());
   firstTimer = setTimeout(() => void check(), FIRST_CHECK_MS);
   timer = setInterval(() => void check(), CHECK_EVERY_MS);
 }
@@ -150,4 +177,4 @@ function stop() {
   clearInterval(timer);
 }
 
-module.exports = { init, check, install, getState, stop };
+module.exports = { init, check, checkNow, install, getState, stop };

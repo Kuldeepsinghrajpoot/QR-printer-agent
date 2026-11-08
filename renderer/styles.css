@@ -268,3 +268,6 @@ button.small:hover { border-color: var(--accent); }
 
 /* Agent key: shown as a status line once added (the key itself is never displayed) */
 .key-submitted { display: flex; align-items: center; gap: 12px; }
+
+#checkUpdate { color: var(--accent); }
+#updateNote { margin-left: 6px; }

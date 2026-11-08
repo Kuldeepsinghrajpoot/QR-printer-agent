@@ -4,8 +4,15 @@
   const btn = document.getElementById('updateBtn');
   if (!btn || !window.updateAPI) return;
 
+  const ver = document.getElementById('appVer');
+  const note = document.getElementById('updateNote');
+  const link = document.getElementById('checkUpdate');
+  if (link) link.addEventListener('click', (e) => { e.preventDefault(); void window.updateAPI.check(); });
+
   function render(st) {
     const s = st && st.state;
+    if (ver && st && st.current) ver.textContent = 'Version ' + st.current;
+    if (note) note.textContent = (st && st.note) || '';
     if (!s || s === 'none') {
       btn.classList.add('hidden'); // no update -> nothing to show
       return;

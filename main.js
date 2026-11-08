@@ -25,7 +25,7 @@ function createWindow() {
     height: 780,
     minWidth: 760,
     minHeight: 540,
-    title: 'Printer Monitor + Print Agent',
+    title: 'QRtoPrint - Powered by Lexical Software',
     icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: '#0f1419',
     webPreferences: {
@@ -98,10 +98,10 @@ function agentStatusLabel(status) {
 function refreshTray() {
   if (!tray) return;
   const status = worker.getStatus();
-  tray.setToolTip('Printer Monitor + Print Agent — ' + agentStatusLabel(status));
+  tray.setToolTip('QRtoPrint Agent — ' + agentStatusLabel(status));
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Printer Monitor + Print Agent', enabled: false },
+      { label: 'QRtoPrint - Powered by Lexical Software', enabled: false },
       { label: agentStatusLabel(status), enabled: false },
       { label: 'Queued retries: ' + status.queueLength, enabled: false },
       { type: 'separator' },
@@ -218,7 +218,7 @@ function relaunchApp(reason) {
   const next = process.uptime() > STABLE_UPTIME_SECONDS ? 1 : getRestartCount() + 1;
   if (next > MAX_AUTO_RESTARTS) {
     dialog.showErrorBox(
-      'Printer Monitor',
+      'QRtoPrint',
       'The app keeps crashing and will not restart again.\n\nDetails are in crash.log in:\n' + app.getPath('userData')
     );
     app.exit(1);
@@ -246,6 +246,7 @@ if (!gotLock) {
     ipcMain.handle('printers:scan', () => scanPrinters());
     ipcMain.handle('update:get-state', () => updater.getState());
     ipcMain.handle('update:install', () => updater.install());
+    ipcMain.handle('update:check', () => updater.checkNow());
     createWindow();
     startAgent();
     updater.init({
