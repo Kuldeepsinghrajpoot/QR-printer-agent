@@ -276,3 +276,6 @@ button.small:hover { border-color: var(--accent); }
 
 #updateBtn:disabled { opacity: .55; cursor: default; }
 #updateBtn[data-state="available"], #updateBtn[data-state="error"] { border-color: var(--accent); }
+
+.update-actions { margin-left: auto; }
+.update-actions:has(#updateBtn.hidden) { display: none; }

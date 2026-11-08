@@ -12,10 +12,13 @@
     <div>
       <h1>QRtoPrint <span class="plus">Powered by Lexical Software</span></h1>
       <p class="sub" id="lastScan">Not scanned yet</p>
-      <p class="sub"><span id="appVer"></span> · <a href="#" id="checkUpdate">Check for updates</a> <span id="updateNote"></span></p>
+      <p class="sub"><span id="appVer"></span> <span id="updateNote"></span></p>
+    </div>
+    <div class="actions update-actions">
+      <!-- shown on every tab: the button appears only when an update was received -->
+      <button id="updateBtn" class="small hidden" type="button"></button>
     </div>
     <div class="actions monitor-only">
-      <button id="updateBtn" class="small" type="button" disabled></button>
       <label class="toggle">
         <input type="checkbox" id="autoRefresh" />
         <span>Auto-refresh (30s)</span>

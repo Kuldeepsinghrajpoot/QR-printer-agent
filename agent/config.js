@@ -11,7 +11,7 @@ const path = require('path');
  * Windows printer name. Normally not needed — printers are discovered and linked automatically.
  */
 /** The dashboard this app always talks to. Fixed on purpose: it is not a setting, can't be edited and isn't shown. */
-const SERVER_URL = 'https://qr.lexicalsoftware.in';
+const SERVER_URL = 'https://www.qr.lexicalsoftware.in';
 
 const DEFAULTS = {
   agentApiKey: '',

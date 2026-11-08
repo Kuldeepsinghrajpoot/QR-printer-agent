@@ -1,5 +1,5 @@
 'use strict';
-// "Update" button: always shown, clickable only when a newer version is available on GitHub.
+// "Update" button: hidden unless a newer version is available on GitHub.
 (function () {
   const btn = document.getElementById('updateBtn');
   if (!btn || !window.updateAPI) return;
@@ -12,15 +12,15 @@
   function render(st) {
     const s = st && st.state;
     if (ver && st && st.current) ver.textContent = 'Version ' + st.current;
-    if (note) note.textContent = (st && st.note) || '';
-    btn.classList.remove('hidden'); // always visible: enabled only when an update is available, otherwise disabled
-    if (!s || s === 'none') {
-      btn.dataset.state = 'none';
+    const upToDate = !s || s === 'none';
+    // up to date: no button, just "You're up to date"; update received: the button (no note)
+    if (note) note.textContent = upToDate ? "· ✓ You're up to date" : (st && st.note) || '';
+    if (upToDate) {
+      btn.classList.add('hidden'); // up to date -> no button at all
       btn.disabled = true;
-      btn.title = 'No update available';
-      btn.textContent = '✓ Up to date' + (st && st.current ? ' (v' + st.current + ')' : '');
       return;
     }
+    btn.classList.remove('hidden'); // an update exists (or is installing) -> show the button
     btn.dataset.state = s;
     btn.disabled = false;
     btn.title = '';
