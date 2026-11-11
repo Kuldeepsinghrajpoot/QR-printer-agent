@@ -48,7 +48,7 @@ const getActivity = () => activity.slice();
  */
 async function physicalPrinters() {
   try {
-    const res = getCachedScan(10000) || (await scanPrinters());
+    const res = getCachedScan(25000) || (await scanPrinters());
     if (res && res.ok && !res.mock) {
       const list = res.data.printers.filter((p) => !p.isVirtual);
       if (list.length) return list.map((p) => ({ name: p.name, scan: p }));
@@ -62,7 +62,7 @@ async function physicalPrinters() {
 function dashboardStatus(scan) {
   if (scan.connection === 'disconnected') return 'offline';
   if (scan.paperLevel === 'jam') return 'paper_jam';
-  if (scan.paperLevel === 'empty' || scan.paperLevel === 'problem') return 'out_of_paper';
+  if (scan.paperLevel === 'empty') return 'out_of_paper';
   if (scan.tonerLevel === 'low' || scan.tonerLevel === 'empty') return 'low_ink';
   return 'online';
 }
@@ -402,6 +402,49 @@ async function heartbeatOnce() {
   }
 }
 
+// ---------- Shop presence (shop shows "online" on the dashboard while this app is open) ----------
+
+const PRESENCE_EVERY_MS = 15 * 1000;
+let presenceTimer = null;
+let presenceMissing = false; // the server has no /api/agent/heartbeat yet (404) - say so once, then stay quiet
+let presenceSeq = 0;
+
+/** Small summary from the LAST printer scan (never starts a scan, so this beat is cheap and fast). */
+function printerSummary() {
+  const res = getCachedScan(10 * 60 * 1000);
+  if (!res || !res.ok || res.mock) return undefined;
+  const real = res.data.printers.filter((p) => !p.isVirtual);
+  return { total: real.length, online: real.filter((p) => p.connection !== 'disconnected').length };
+}
+
+async function presenceBeat(status) {
+  if (!config.get('agentApiKey')) return;
+  const machine = await getMachineInfo();
+  const timeout = status === 'offline' ? 3000 : 10000;
+  try {
+    await api.sendShopHeartbeat(
+      { agent: machine, agentId: machine.id, status, seq: ++presenceSeq, sentAt: new Date().toISOString(), printers: printerSummary() },
+      timeout
+    );
+    if (presenceMissing) log('', 'ok', 'Shop online status is now reaching the dashboard.');
+    presenceMissing = false;
+  } catch (err) {
+    if (err && err.status === 404) {
+      if (!presenceMissing) log('', 'info', 'Dashboard has no /api/agent/heartbeat yet, so the shop cannot show as online. Add that route to the server (see README).');
+      presenceMissing = true;
+    } else {
+      console.error('Shop presence beat failed:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+/** Tells the dashboard the shop just went offline (app quitting). Waits at most 3 s. */
+async function goOffline() {
+  clearInterval(presenceTimer);
+  presenceTimer = null;
+  try { await presenceBeat('offline'); } catch (_) { /* best effort */ }
+}
+
 // ---------- Lifecycle ----------
 
 let pollTimer = null;
@@ -412,7 +455,8 @@ function stop() {
   clearInterval(pollTimer);
   clearInterval(heartbeatTimer);
   clearTimeout(firstBeatTimer);
-  pollTimer = heartbeatTimer = firstBeatTimer = null;
+  clearInterval(presenceTimer);
+  pollTimer = heartbeatTimer = firstBeatTimer = presenceTimer = null;
   running = false;
 }
 
@@ -428,6 +472,8 @@ function start() {
   const pollMs = Math.max(3, Number(config.get('pollIntervalSeconds')) || 5) * 1000;
   const heartbeatMs = Math.max(10, Number(config.get('heartbeatIntervalSeconds')) || 30) * 1000;
 
+  void presenceBeat('online'); // shop shows online right away
+  presenceTimer = setInterval(() => void presenceBeat('online'), PRESENCE_EVERY_MS);
   void pollOnce();
   firstBeatTimer = setTimeout(() => void heartbeatOnce(), 4000);
   pollTimer = setInterval(() => void pollOnce(), pollMs);
@@ -461,6 +507,7 @@ async function testPrint(systemPrinterName, mode) {
 
 module.exports = {
   testPrint,
+  goOffline,
   start,
   stop,
   restart: start,

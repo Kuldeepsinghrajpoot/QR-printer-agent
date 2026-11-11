@@ -261,10 +261,19 @@ if (!gotLock) {
     });
   });
 
-  app.on('before-quit', () => {
+  let offlineSent = false;
+  app.on('before-quit', (e) => {
     isQuitting = true;
-    worker.stop();
     updater.stop();
+    if (!offlineSent) {
+      // Tell the dashboard the shop is closing (max 3 s), then really quit.
+      e.preventDefault();
+      offlineSent = true;
+      worker.stop();
+      worker.goOffline().finally(() => app.quit());
+      return;
+    }
+    worker.stop();
   });
 
   app.on('window-all-closed', () => {

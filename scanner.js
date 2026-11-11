@@ -51,7 +51,7 @@ function scanPrintersOnce() {
     execFile(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
-      { windowsHide: true, maxBuffer: 20 * 1024 * 1024, timeout: 90000, encoding: 'utf8' },
+      { windowsHide: true, maxBuffer: 20 * 1024 * 1024, timeout: 45000, encoding: 'utf8' },
       (error, stdout, stderr) => {
         if (error) {
           return resolve({ ok: false, error: (stderr && stderr.trim()) || error.message });

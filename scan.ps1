@@ -30,6 +30,22 @@ function Test-Tcp([string]$hostName, [int]$port) {
     finally { $c.Close() }
 }
 
+# ---------- colour-capability cache ----------
+# GetPrintCapabilities() opens the printer through the Windows spooler. For an offline / shared (\\server\printer)
+# printer that makes Windows pop up "Waiting for printer connection..." on the screen. Colour support almost never
+# changes, so it is asked at most once per printer per day, and NEVER for a printer that is unreachable.
+$colorCachePath = Join-Path $env:TEMP 'printer-monitor-color-cache.json'
+$colorCache = @{}
+$colorCacheDirty = $false
+try {
+    if (Test-Path $colorCachePath) {
+        $raw = Get-Content -Raw -Path $colorCachePath | ConvertFrom-Json
+        foreach ($prop in $raw.PSObject.Properties) { $colorCache[[string]$prop.Name] = $prop.Value }
+    }
+} catch { $colorCache = @{} }
+$colorCacheTtlSec = 24 * 3600
+$nowEpoch = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+
 # ---------- gather data ----------
 $spooler = [string](Get-Service -Name Spooler).Status
 
@@ -78,29 +94,6 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
 
     # --- virtual printers (PDF, XPS, OneNote, Fax ...) ---
     $isVirtual = ($port -match '^(PORTPROMPT:|nul:|SHRFAX:|FILE:|XPSPort:|HPSmartPrintingPort)') -or (("$name $driver") -match 'PDF|XPS Document|OneNote|Fax|HP Smart Printing|Snagit|Webex|Zoom')
-
-    # --- colour support ---
-    # 1) Win32_Printer.Capabilities: 2 = Color Printing (cheap; the driver's own list).
-    # 2) When that list is empty (class / IPP / WSD drivers often leave it empty), ask the driver's print capabilities
-    #    (what the Windows print dialog uses): OutputColorCapability lists Color / Grayscale / Monochrome.
-    # $null = Windows could not tell (the dashboard then keeps whatever the shop set).
-    $colorCapable = $null
-    if (-not $isVirtual) {
-        $caps = @($p.Capabilities | Where-Object { $_ -ne $null })
-        if ($caps.Count -gt 0) { $colorCapable = ($caps -contains 2) }
-        if ($colorCapable -ne $true) {
-            try {
-                if (-not $script:printSrv) {
-                    Add-Type -AssemblyName System.Printing
-                    $script:printSrv = New-Object System.Printing.LocalPrintServer
-                }
-                $q = $script:printSrv.GetPrintQueue($name)
-                $oc = @($q.GetPrintCapabilities().OutputColorCapability | ForEach-Object { [string]$_ })
-                if ($oc -contains 'Color') { $colorCapable = $true }
-                elseif ($oc.Count -gt 0 -and $colorCapable -eq $null) { $colorCapable = $false }
-            } catch { }
-        }
-    }
 
     # --- connection type ---
     $ip = ''
@@ -206,6 +199,42 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         } else { $detail = 'Windows reports online (not independently verified)' }
     }
 
+    # --- colour support (done AFTER the connection check so an unreachable printer is never opened) ---
+    # 1) Win32_Printer.Capabilities: 2 = Color Printing (cheap; no spooler connection needed).
+    # 2) Else the cached answer for this printer (valid 24 h).
+    # 3) Else, ONLY for a reachable local printer, ask the driver (OutputColorCapability).
+    # $null = could not tell (the dashboard then keeps whatever the shop set).
+    $colorCapable = $null
+    if (-not $isVirtual) {
+        $caps = @($p.Capabilities | Where-Object { $_ -ne $null })
+        if ($caps.Count -gt 0) { $colorCapable = ($caps -contains 2) }
+        if ($colorCapable -ne $true) {
+            $cached = $colorCache[$name]
+            if ($cached -and (($nowEpoch - [int]$cached.at) -lt $colorCacheTtlSec)) {
+                $colorCapable = [bool]$cached.color
+            }
+            else {
+                $isRemoteConn = ($portType -eq 'Shared network printer') -or ($gp -and ([string]$gp.Type -eq 'Connection'))
+                if ($connection -ne 'disconnected' -and -not $offline -and -not $isRemoteConn) {
+                    try {
+                        if (-not $script:printSrv) {
+                            Add-Type -AssemblyName System.Printing
+                            $script:printSrv = New-Object System.Printing.LocalPrintServer
+                        }
+                        $q = $script:printSrv.GetPrintQueue($name)
+                        $oc = @($q.GetPrintCapabilities().OutputColorCapability | ForEach-Object { [string]$_ })
+                        if ($oc -contains 'Color') { $colorCapable = $true }
+                        elseif ($oc.Count -gt 0 -and $colorCapable -eq $null) { $colorCapable = $false }
+                        if ($colorCapable -ne $null) {
+                            $colorCache[$name] = [pscustomobject]@{ color = [bool]$colorCapable; at = $nowEpoch }
+                            $colorCacheDirty = $true
+                        }
+                    } catch { }
+                }
+            }
+        }
+    }
+
     # --- status text ---
     $statusText = 'Unknown'
     if ($p.PrinterStatus -ne $null -and $statusMap.ContainsKey([int]$p.PrinterStatus)) { $statusText = $statusMap[[int]$p.PrinterStatus] }
@@ -213,47 +242,21 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
     if ($isVirtual) { $statusText = 'Ready' }
     elseif ($connection -eq 'disconnected') { $statusText = 'Offline' }
 
-    $jobList = @(Get-PrintJob -PrinterName $name)
-
     # --- paper / toner / errors ---
     $paper = 'unknown'
     $toner = 'unknown'
     $errs = New-Object System.Collections.ArrayList
 
     if ($isVirtual) { $paper = 'na'; $toner = 'na' }
-    else {
+    elseif ($connection -ne 'disconnected') {
         $codes = @()
         if ($p.DetectedErrorState -ne $null) { $codes += [int]$p.DetectedErrorState }
         if ($p.ExtendedDetectedErrorState -ne $null) { $codes += [int]$p.ExtendedDetectedErrorState }
 
-        # Many USB / inkjet drivers never fill DetectedErrorState or Get-Printer's status. Two more places Windows
-        # records the same problem: the old PrinterState / ExtendedPrinterStatus numbers, and the status of the jobs
-        # waiting in this printer's queue (a job stuck with PaperOut / UserIntervention / Error means the printer
-        # refused it).
-        $legacy = -1
-        if ($p.PrinterState -ne $null) { $legacy = [int]$p.PrinterState }
-        $ext = -1
-        if ($p.ExtendedPrinterStatus -ne $null) { $ext = [int]$p.ExtendedPrinterStatus }
-        $jobText = (@($jobList | ForEach-Object { [string]$_.JobStatus }) -join ' ')
-
-        $jam = ($codes -contains 8) -or ($gpStatus -eq 'PaperJam') -or ($legacy -eq 4)
-        $out = ($codes -contains 4) -or ($gpStatus -eq 'PaperOut') -or ($legacy -eq 5) -or ($jobText -match 'PaperOut')
+        $jam = ($codes -contains 8) -or ($gpStatus -eq 'PaperJam')
+        $out = ($codes -contains 4) -or ($gpStatus -eq 'PaperOut')
         $low = ($codes -contains 3)
-        $prob = ($gpStatus -eq 'PaperProblem') -or ($legacy -eq 7) -or ($jobText -match 'UserIntervention')
-        if ($legacy -eq 17 -and ($errs -notcontains 'Door open')) { [void]$errs.Add('Door open') }
-        if ($legacy -eq 16 -and ($errs -notcontains 'Printer out of memory')) { [void]$errs.Add('Printer out of memory') }
-        if ($jam -and ($errs -notcontains 'Paper jam')) { [void]$errs.Add('Paper jam') }
-        if ($out -and ($errs -notcontains 'Out of paper')) { [void]$errs.Add('Out of paper') }
-        if ($prob -and -not $jam -and -not $out -and ($errs -notcontains 'Paper problem')) { [void]$errs.Add('Paper problem') }
-        if (($legacy -eq 2 -or $ext -eq 9 -or $jobText -match 'Error') -and -not $jam -and -not $out -and -not $prob -and $errs.Count -eq 0) { [void]$errs.Add('Printer error') }
-
-        # A jam / empty tray makes Windows flag many USB printers "offline". When the only reason for "disconnected" is
-        # that Windows flag (not a failed network check or a missing USB device), show the real problem instead.
-        if ($connection -eq 'disconnected' -and ($jam -or $out) -and $detail -like 'Windows reports*') {
-            $connection = 'connected'
-            if ($jam) { $detail = 'Paper jam (Windows shows the printer as offline)' } else { $detail = 'Out of paper (Windows shows the printer as offline)' }
-            $statusText = 'Error'
-        }
+        $prob = ($gpStatus -eq 'PaperProblem')
 
         if ($jam) { $paper = 'jam' }
         elseif ($out) { $paper = 'empty' }
@@ -270,7 +273,9 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         if ($gpErrMap.ContainsKey($gpStatus) -and ($errs -notcontains $gpErrMap[$gpStatus])) { [void]$errs.Add($gpErrMap[$gpStatus]) }
     }
 
-    $jobs = $jobList.Count
+    # Get-PrintJob also opens the printer: skip it for printers that are unreachable / offline (no pop-up, faster scan).
+    $jobs = 0
+    if ($connection -ne 'disconnected' -and -not $offline) { $jobs = @(Get-PrintJob -PrinterName $name).Count }
 
     $results += [pscustomobject]@{
         name        = $name
@@ -294,6 +299,8 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
         comment     = [string]$p.Comment
     }
 }
+
+if ($colorCacheDirty) { try { ($colorCache | ConvertTo-Json -Depth 4 -Compress) | Set-Content -Path $colorCachePath -Encoding UTF8 } catch { } }
 
 $payload = [pscustomobject]@{
     scannedAt = (Get-Date).ToString('o')

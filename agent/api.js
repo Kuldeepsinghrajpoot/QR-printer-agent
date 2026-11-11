@@ -7,7 +7,7 @@ const MAX_FILE_BYTES = 40 * 1024 * 1024;
 const baseUrl = () => String(config.get('serverUrl') || '').trim().replace(/\/+$/, '');
 
 /** JSON request to the dashboard server with the agent key. Errors carry the server's own message. */
-async function request(method, urlPath, body) {
+async function request(method, urlPath, body, timeoutMs = 20000) {
   let res;
   try {
     res = await fetch(baseUrl() + urlPath, {
@@ -17,7 +17,7 @@ async function request(method, urlPath, body) {
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     const why = (err && err.cause && (err.cause.code || err.cause.message)) || err.message;
@@ -72,6 +72,13 @@ async function reportPrinterStatus(dbPrinterId, status, agentId) {
   await request('PATCH', `/api/printers/${dbPrinterId}/status`, { status, ...(agentId ? { agentId } : {}) });
 }
 
+/**
+ * Shop presence: "this shop's print agent is open and running" (status 'online'), or "it just closed" ('offline').
+ * The dashboard treats the shop as online while the last beat is recent, so a crash / power cut / lost internet
+ * also turns the shop offline by itself a short time after the beats stop.
+ */
+const sendShopHeartbeat = (payload, timeoutMs) => request('POST', '/api/agent/heartbeat', payload, timeoutMs);
+
 /** Downloads the order's file into a Buffer, ready to hand to the printer. */
 async function downloadFile(fileUrl) {
   const parsed = new URL(fileUrl); // throws on garbage
@@ -102,4 +109,4 @@ async function downloadFile(fileUrl) {
   return buf;
 }
 
-module.exports = { fetchQueuedOrders, syncPrinters, reportOrderStatus, reportPrinterStatus, downloadFile };
+module.exports = { fetchQueuedOrders, syncPrinters, reportOrderStatus, reportPrinterStatus, sendShopHeartbeat, downloadFile };

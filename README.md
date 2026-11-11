@@ -117,3 +117,18 @@ Orders can ask for 2, 4, 6, 9 or 16 pages per sheet and for double-sided printin
   Run `npm install` once after updating, because `pdf-lib` is a new dependency.
 - **Flip edge** sets Windows' duplex mode (`TwoSidedLongEdge` / `TwoSidedShortEdge`) and SumatraPDF's `duplexlong` / `duplexshort`.
   Print one test sheet per printer first: some drivers treat long/short edge differently for landscape sheets (2-up, 6-up).
+
+
+## Shop online status (dashboard)
+
+While the app is open and an AGENT_API KEY is set, it sends `POST /api/agent/heartbeat` every 15 seconds (header `x-agent-key`),
+and one last beat with `status: "offline"` when you quit. Body:
+
+```json
+{ "agentId": "uuid", "agent": { "hostname": "...", "appVersion": "1.0.13" }, "status": "online" | "offline",
+  "seq": 12, "sentAt": "ISO date", "printers": { "total": 2, "online": 1 } }
+```
+
+Server side: store `lastSeenAt` (and `status`) for the shop that owns the agent key. Treat the shop as **online** when
+`status === "online"` and `lastSeenAt` is less than 45 seconds old; otherwise offline (this also covers a crash, power cut or no internet).
+Until that route exists the server answers 404 and the Activity log shows a one-time note.
