@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // to the dashboard).
 // ---------------------------------------------------------------------------
 
+
 function getScriptPath() {
   // PowerShell can't read files inside app.asar, so copy the script to the
   // temp folder (with a UTF-8 BOM so Windows PowerShell 5.1 reads it correctly).
