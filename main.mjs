@@ -1,11 +1,14 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const { scanPrinters } = require('./scanner');
-const agentConfig = require('./agent/config');
-const worker = require('./agent/worker');
-const { getMachineInfo } = require('./agent/machine');
-const updater = require('./agent/updater');
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { scanPrinters } from './scanner.js';
+import agentConfig from './agent/config.js';
+import worker from './agent/worker.js';
+import { getMachineInfo } from './agent/machine.js';
+import updater from './agent/updater.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
 let tray = null;
@@ -29,7 +32,7 @@ function createWindow() {
     icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: '#0f1419',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

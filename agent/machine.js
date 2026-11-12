@@ -1,9 +1,9 @@
 'use strict';
-const os = require('os');
-const crypto = require('crypto');
-const { execFile } = require('child_process');
-const { app } = require('electron');
-const config = require('./config');
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { app } from 'electron';
+import config from './config.js';
 
 /** Stable random id of this installation (generated once and kept in the agent settings). */
 function getAgentId() {
@@ -56,4 +56,4 @@ async function getMachineInfo() {
   return info;
 }
 
-module.exports = { getAgentId, getMachineInfo };
+export { getAgentId, getMachineInfo };

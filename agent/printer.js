@@ -1,14 +1,14 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.listSystemPrinters = listSystemPrinters;
-exports.printOrder = printOrder;
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const { execFile } = require("child_process");
-const net = require("net");
-const crypto = require("crypto");
-const { imposeNUp, isPdf, SUPPORTED: NUP_SUPPORTED } = require("./nup");
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { execFile } from "node:child_process";
+import net from "node:net";
+import crypto from "node:crypto";
+import { createRequire } from "node:module";
+import { imposeNUp, isPdf, SUPPORTED as NUP_SUPPORTED } from "./nup.js";
+
+const require = createRequire(import.meta.url);
 // Loaded lazily: pdf-to-printer only works on Windows, and the app must still start (mock mode) elsewhere.
 let pdfToPrinter = null;
 const pdf = () => (pdfToPrinter = pdfToPrinter || require("pdf-to-printer"));
@@ -18,7 +18,7 @@ const VIRTUAL_PRINTER = /onenote|print to pdf|pdf|xps|fax|snagit|cutepdf|send to
  * Lists REAL printers installed on this machine (as Windows/OS sees them).
  * Used to link dashboard printers to the exact local printer name.
  */
-async function listSystemPrinters() {
+export async function listSystemPrinters() {
     try {
         const all = await pdf().getPrinters();
         return all.filter((p) => !VIRTUAL_PRINTER.test(p.name));
@@ -115,14 +115,13 @@ async function setColorMode(printer, color) {
  * start when Windows says the printer can't print, and (2) watch the spooler until OUR job leaves the queue,
  * failing the order (and removing the stuck job, so it can't print later as a duplicate) if it gets stuck. */
 /** Thrown for problems we detected ourselves — message is already shopkeeper-friendly. */
-class PrintCheckError extends Error {
+export class PrintCheckError extends Error {
     /** stalled = the printer itself is the problem (offline / job stuck) -> the agent reports it offline. */
     constructor(message, stalled = false) {
         super(message);
         this.printerStalled = stalled;
     }
 }
-exports.PrintCheckError = PrintCheckError;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Jobs currently in this printer's Windows queue. null = couldn't read the queue (don't block on it). */
 async function listJobs(printer) {
@@ -278,7 +277,7 @@ async function verifyPrinted(printer, before) {
  * needs no library. It uses only a little ink. If the coloured swatches come out grey or black, colour is being
  * lost between Windows and this printer.
  */
-function colourTestPdf() {
+export function colourTestPdf() {
     const swatches = [
         ["0 1 1", "Cyan"], ["1 0 1", "Magenta"], ["1 1 0", "Yellow"], ["0 0 0", "Black"],
     ];
@@ -305,12 +304,11 @@ function colourTestPdf() {
     pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
     return Buffer.from(pdf, "latin1");
 }
-exports.colourTestPdf = colourTestPdf;
 /**
  * Saves the order's file to a temp path and sends it to the given Windows printer.
  * On Windows it then waits until the job has actually left the print queue, so "ready" means it printed.
  */
-async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, duplex, duplexEdge, pagesPerSheet, printType }) {
+export async function printOrder({ fileBuffer, fileName, systemPrinterName, copies, duplex, duplexEdge, pagesPerSheet, printType }) {
     const warnings = []; // non-fatal things worth showing in the activity log
     // "color" -> true, "bw" -> false, anything else (old callers) -> leave the printer's own setting alone.
     const wantColor = printType === "color" ? true : printType === "bw" ? false : null;

@@ -8,6 +8,7 @@ One Windows app with two jobs:
 Closing the window keeps the agent running in the system tray (Quit from the tray icon). Run it on **one** PC only.
 
 ### First-time setup of the agent
+
 1. `npm install`, then `npm start` (or install the built app).
 2. Open the **Print Agent** tab, enter your dashboard URL and the **AGENT_API KEY** (same value as `AGENT_API_KEY` on the server), click **Save & restart agent**.
 3. Printers on this PC appear automatically; set each printer's type (B&W / Color) in the dashboard → Printers.
@@ -59,7 +60,8 @@ Self-updates work in the installed Windows app, not in `npm start`. `npm run fak
 
 ## How the Printers tab works
 
-`main.js` runs `scan.ps1` through Windows PowerShell and sends the JSON result to the window.
+`main.mjs` runs `scan.ps1` through Windows PowerShell and sends the JSON result to the window.
+Node-side application modules use ES modules. The renderer uses browser scripts, and Electron's sandboxed preload stays CommonJS in `preload.cjs`.
 The script uses `Win32_Printer`, `Get-Printer`, `Get-PrinterPort`, `Get-PrintJob` and `Get-PnpDevice`.
 
 How "connected" is decided:

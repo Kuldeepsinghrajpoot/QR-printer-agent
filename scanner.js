@@ -1,7 +1,10 @@
-const { app } = require('electron');
-const { execFile } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+import { app } from 'electron';
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Printer scan (Windows: PowerShell script; other OS: mock data for UI dev).
@@ -91,4 +94,4 @@ function getCachedScan(maxAgeMs) {
   return last && Date.now() - last.at <= maxAgeMs ? last.result : null;
 }
 
-module.exports = { scanPrinters, getCachedScan };
+export { scanPrinters, getCachedScan };

@@ -1,7 +1,8 @@
 'use strict';
-const { app } = require('electron');
-const fs = require('fs');
-const path = require('path');
+import { app } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+
 
 /**
  * A tiny persisted queue for status updates that couldn't reach the server (e.g. the shop's internet
@@ -23,7 +24,7 @@ function write(list) {
   fs.writeFileSync(file(), JSON.stringify(list), 'utf8');
 }
 
-module.exports = {
+const queue = {
   getAll: read,
   enqueue(update) {
     const list = read();
@@ -40,3 +41,5 @@ module.exports = {
     write(list);
   },
 };
+
+export default queue;

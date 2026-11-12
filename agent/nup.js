@@ -4,7 +4,9 @@
  * browser's print dialog. SumatraPDF and most drivers can't do this reliably, so we build the sheets ourselves and
  * print the result as a normal PDF. Pure JavaScript (pdf-lib), nothing native to install.
  */
-const { PDFDocument, rgb } = require('pdf-lib');
+import pdfLib from 'pdf-lib';
+
+const { PDFDocument, rgb } = pdfLib;
 
 /** columns x rows for each choice. 2-up and 6-up use a landscape sheet so the pages stay upright and as big as possible. */
 const GRID = { 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 16: [4, 4] };
@@ -62,4 +64,4 @@ async function imposeNUp(pdfBuffer, perSheet) {
   return Buffer.from(await out.save());
 }
 
-module.exports = { imposeNUp, isPdf, SUPPORTED };
+export { imposeNUp, isPdf, SUPPORTED };

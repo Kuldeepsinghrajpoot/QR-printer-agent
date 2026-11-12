@@ -1,7 +1,8 @@
 'use strict';
-const { app } = require('electron');
-const fs = require('fs');
-const path = require('path');
+import { app } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+
 
 /**
  * Persistent settings of the Print Agent, stored as JSON in the app's data folder
@@ -37,7 +38,7 @@ function load() {
   return cache;
 }
 
-module.exports = {
+const config = {
   SERVER_URL,
   get: (key) => (key === 'serverUrl' ? SERVER_URL : load()[key]),
   getAll: () => ({ ...load(), serverUrl: SERVER_URL }),
@@ -47,3 +48,5 @@ module.exports = {
     fs.writeFileSync(file(), JSON.stringify(cache, null, 2), 'utf8');
   },
 };
+
+export default config;

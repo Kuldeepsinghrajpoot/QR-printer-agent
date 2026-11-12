@@ -1,5 +1,5 @@
 'use strict';
-const config = require('./config');
+import config from './config.js';
 
 /** Max file size we will download (the server caps uploads at 25MB). */
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
@@ -109,4 +109,4 @@ async function downloadFile(fileUrl) {
   return buf;
 }
 
-module.exports = { fetchQueuedOrders, syncPrinters, reportOrderStatus, reportPrinterStatus, sendShopHeartbeat, downloadFile };
+export { fetchQueuedOrders, syncPrinters, reportOrderStatus, reportPrinterStatus, sendShopHeartbeat, downloadFile };

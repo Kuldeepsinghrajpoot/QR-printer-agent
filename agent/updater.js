@@ -12,7 +12,9 @@
  * Only the installed Windows app can update itself (electron-updater needs the packaged NSIS build).
  * Set PRINTER_MONITOR_FAKE_UPDATE=1 to see the button flow in `npm start` without a real release.
  */
-const { app } = require('electron');
+import { app } from 'electron';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 
 const FAKE = process.env.PRINTER_MONITOR_FAKE_UPDATE === '1';
 const FIRST_CHECK_MS = 20 * 1000;
@@ -177,4 +179,6 @@ function stop() {
   clearInterval(timer);
 }
 
-module.exports = { init, check, checkNow, install, getState, stop };
+const updater = { init, check, checkNow, install, getState, stop };
+
+export default updater;

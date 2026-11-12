@@ -1,11 +1,11 @@
 'use strict';
-const config = require('./config');
-const queue = require('./queue');
-const api = require('./api');
-const { printOrder, listSystemPrinters, colourTestPdf } = require('./printer');
-const { scanPrinters, getCachedScan } = require('../scanner');
-const { getMachineInfo } = require('./machine');
-const { createHealthTracker } = require('./health');
+import config from './config.js';
+import queue from './queue.js';
+import * as api from './api.js';
+import { printOrder, listSystemPrinters, colourTestPdf } from './printer.js';
+import { scanPrinters, getCachedScan } from '../scanner.js';
+import { getMachineInfo } from './machine.js';
+import { createHealthTracker } from './health.js';
 
 /** Knows when a printer must be reported offline although Windows still says it is fine (see health.js). */
 const health = createHealthTracker();
@@ -60,10 +60,21 @@ async function physicalPrinters() {
 
 /** Maps the scan result to the dashboard's printer status. */
 function dashboardStatus(scan) {
+  const status = String(scan.status || '').trim().toLowerCase();
   if (scan.connection === 'disconnected') return 'offline';
-  if (scan.paperLevel === 'jam') return 'paper_jam';
-  if (scan.paperLevel === 'empty') return 'out_of_paper';
-  if (scan.tonerLevel === 'low' || scan.tonerLevel === 'empty') return 'low_ink';
+  if (scan.paperLevel === 'jam' || status === 'paper jam') return 'paper_jam';
+  if (scan.paperLevel === 'empty' || status === 'out of paper') return 'out_of_paper';
+  if (
+    scan.tonerLevel === 'low' ||
+    scan.tonerLevel === 'empty' ||
+    status === 'low toner' ||
+    status === 'out of toner'
+  ) return 'low_ink';
+  if ([
+    'offline', 'paused', 'stopped printing', 'paper problem', 'door open',
+    'output bin full', 'user intervention needed', 'printer out of memory',
+    'service requested', 'printer error', 'error',
+  ].includes(status)) return 'offline';
   return 'online';
 }
 
@@ -505,7 +516,7 @@ async function testPrint(systemPrinterName, mode) {
   }
 }
 
-module.exports = {
+const worker = {
   testPrint,
   goOffline,
   start,
@@ -519,3 +530,5 @@ module.exports = {
   hasActivePrint: () => scheduled.size > 0,
   setStatusListener,
 };
+
+export default worker;

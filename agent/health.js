@@ -123,4 +123,4 @@ function createHealthTracker(now = Date.now) {
   };
 }
 
-module.exports = { createHealthTracker, IDLE_BEATS, STALL_MAX_MS, QUEUED_STALE_MS };
+export { createHealthTracker, IDLE_BEATS, STALL_MAX_MS, QUEUED_STALE_MS };

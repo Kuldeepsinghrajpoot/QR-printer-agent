@@ -238,7 +238,23 @@ foreach ($p in @(Get-CimInstance -ClassName Win32_Printer)) {
     # --- status text ---
     $statusText = 'Unknown'
     if ($p.PrinterStatus -ne $null -and $statusMap.ContainsKey([int]$p.PrinterStatus)) { $statusText = $statusMap[[int]$p.PrinterStatus] }
-    if ($gpStatus -eq 'Paused') { $statusText = 'Paused' }
+    $detectedStatusText = @{
+        3 = 'Low paper'; 4 = 'Out of paper'; 5 = 'Low toner'; 6 = 'Out of toner'
+        7 = 'Door open'; 8 = 'Paper jam'; 10 = 'Service requested'; 11 = 'Output bin full'
+    }
+    if ($p.DetectedErrorState -ne $null -and $detectedStatusText.ContainsKey([int]$p.DetectedErrorState)) {
+        $statusText = $detectedStatusText[[int]$p.DetectedErrorState]
+    }
+
+    $gpStatusText = @{
+        'Printing' = 'Printing'; 'WarmingUp' = 'Warming up'; 'Paused' = 'Paused'
+        'PaperJam' = 'Paper jam'; 'PaperOut' = 'Out of paper'; 'PaperProblem' = 'Paper problem'
+        'TonerLow' = 'Low toner'; 'NoToner' = 'Out of toner'; 'DoorOpen' = 'Door open'
+        'OutputBinFull' = 'Output bin full'; 'UserIntervention' = 'User intervention needed'
+        'OutOfMemory' = 'Printer out of memory'; 'Error' = 'Printer error'
+    }
+    if ($gpStatusText.ContainsKey($gpStatus)) { $statusText = $gpStatusText[$gpStatus] }
+
     if ($isVirtual) { $statusText = 'Ready' }
     elseif ($connection -eq 'disconnected') { $statusText = 'Offline' }
 
